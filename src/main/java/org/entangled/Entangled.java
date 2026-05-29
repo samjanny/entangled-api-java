@@ -4,7 +4,7 @@ package org.entangled;
  * Entangled v1.0 reference implementation (Java).
  *
  * <p>This is an independent implementation built solely from the Entangled
- * specification at samjanny/entangled tag v1.0-rc.28 (specs/, docs/, corpus/).
+ * specification at samjanny/entangled tag v1.0-rc.29 (specs/, docs/, corpus/).
  * It was written without reference to any other implementation of the protocol.
  *
  * <p>The protocol version targeted on the wire is exactly "1.0"; the spec
@@ -16,7 +16,7 @@ public final class Entangled {
     public static final String SPEC_VERSION = "1.0";
 
     /** The spec revision this implementation was read against. */
-    public static final String SPEC_REVISION = "1.0-rc.28";
+    public static final String SPEC_REVISION = "1.0-rc.29";
 
     private Entangled() {
     }
