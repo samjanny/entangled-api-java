@@ -87,7 +87,8 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 | 130-139 | Stage 5 schema (unknown field, missing required, null literal, unknown block kind, field type, field range, block not permitted in document kind, duplicate uniqueness-required entry, malformed Unicode, field-specific length cap) |
 | 140-142 | Numeric grammar (float, exponent, overflow) |
 | 143     | Stage 5 semantic - submit-budget state-policy aggregate overflow |
-| 144-149 | (reserved) |
+| 144-145 | Stage 5 origin field (carrier enum violation, non-canonical address syntax) |
+| 146-149 | (reserved) |
 | 150-159 | Stage 6 signature (modified payload, malformed length, non-canonical S, small-order A, non-canonical R, non-canonical A, missing-key context, small-order R) |
 | 160-169 | Strict base64url (padding, alphabet, whitespace) |
 | 170-179 | Stage 9 binding (path mismatch, reserved path, request_hash, origin binding, origin not_after semantic constraints including both `reason` values, manifest.updated future-skew) |

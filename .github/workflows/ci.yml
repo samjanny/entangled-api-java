@@ -25,7 +25,7 @@ jobs:
         run: mvn -B test
 
       - name: Verify implementation against the corpus (conformance)
-        # Runs the conformance suite that drives all 62 corpus vectors through
+        # Runs the conformance suite that drives all 64 corpus vectors through
         # the validation pipeline and asserts each verdict, diagnostic code, and
         # structured details against corpus.json. This is the code-vs-corpus
         # check: the build fails if the implementation diverges from any vector.
