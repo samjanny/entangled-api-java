@@ -1,14 +1,14 @@
 # entangled-api-java
 
 [![CI](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml/badge.svg)](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml)
-[![Conformance](https://img.shields.io/badge/corpus-62%2F62-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
-[![Spec](https://img.shields.io/badge/spec-v1.0--rc.27-blue)](https://github.com/samjanny/entangled)
+[![Conformance](https://img.shields.io/badge/corpus-64%2F64-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
+[![Spec](https://img.shields.io/badge/spec-v1.0--rc.29-blue)](https://github.com/samjanny/entangled)
 [![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
 A Java reference implementation of the **Entangled v1.0** protocol,
 built from the specification at
-[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.27`
+[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.29`
 (its `specs/`, `docs/`, and `corpus/`).
 
 ## Usage
@@ -69,14 +69,13 @@ runnable tests.
 
 ## Status
 
-Passes the full conformance corpus: **62 / 62 vectors** match the recorded
+Passes the full conformance corpus: **64 / 64 vectors** match the recorded
 verdict, diagnostic code, and structured `details` byte-identically.
 
-> Note on vector count: the corpus at `v1.0-rc.27` contains **62** vectors
-> (`corpus.json` `rc_target: 1.0-rc.27`). Some older release notes refer to "60
-> vectors"; the additional vectors are the rc.25-rc.27 additions (the
-> manifest-updated future-skew, the runtime-pubkey resurrection, and the
-> migration trio). This implementation targets the rc.27 corpus.
+> Note on vector count: the corpus at `v1.0-rc.29` contains **64** vectors
+> (`corpus.json` `rc_target: 1.0-rc.29`). The two vectors beyond the rc.27
+> set of 62 are the rc.28 additions (`carrier` enum-violation and uppercase
+> `origin.address` field-syntax). This implementation targets the rc.29 corpus.
 
 ## Building and testing
 
@@ -85,7 +84,7 @@ Requires JDK 21 and Maven. The conformance corpus is checked in under
 
 ```sh
 export JAVA_HOME=/path/to/jdk-21
-mvn test                          # all unit tests + the 62-vector conformance suite
+mvn test                          # all unit tests + the 64-vector conformance suite
 mvn test -Dtest=ConformanceTest   # the code-vs-corpus conformance suite only
 ```
 
@@ -93,13 +92,18 @@ CI (`.github/workflows/ci.yml`) runs both on every push.
 
 ## Design notes
 
-- **No third-party crypto.** Ed25519 verification, JCS canonicalization,
-  base64url, SHA, BIP-39 PIP derivation, and Tor v3 address decoding are all
-  implemented in-tree for byte-level control. The JDK's built-in Ed25519
-  (`SunEC`) does not implement the strict `verify_strict` profile section 05
-  mandates (small-order rejection for both `A` and `R`, canonical `R`, `S < L`,
-  cofactorless equation), so verification is hand-implemented over
-  `BigInteger` field arithmetic.
+- **No hand-rolled crypto primitives.** Ed25519 verification and SHA delegate to
+  the JDK (`SunEC`, `MessageDigest`); JCS canonicalization, base64url, BIP-39 PIP
+  derivation, and Tor v3 address decoding are implemented in-tree (they are
+  encodings, not cryptographic primitives). For Ed25519 the JDK provides the curve
+  arithmetic, SHA-512, the canonical-`S` (`S < L`) check, canonical point-encoding
+  rejection, and the cofactorless verification equation section 05:178 mandates.
+  `SunEC` does not reject small-order points, so `Ed25519` adds the one missing
+  strict-profile check (small-order rejection of both `A` and `R`, section 05:174)
+  as a thin layer over the JDK verifier, exactly as section 05:180 directs. The
+  small-order check is a constant-table comparison, not curve arithmetic. The
+  result matches `ed25519-dalek` `verify_strict` on all 15 `ed25519-speccheck`
+  vectors, which `CryptoTest` pins.
 - **First-failing-stage precedence** (section 10) is enforced by running the
   10-stage pipeline in order and converting the first stage's rejection into the
   verdict.
@@ -126,9 +130,16 @@ issues against `samjanny/entangled`:
   non-canonical `origin.address` is not pinned -- Stage 5
   `E_SCHEMA_FIELD_SYNTAX` vs Stage 9 `E_BIND_ORIGIN`. This implementation chose
   Stage 5 `E_SCHEMA_FIELD_SYNTAX`.
+- **AMB-12** (issue #13): whether an Expired canary halts the pipeline at
+  Stage 8 (reporting `E_CANARY_EXPIRED`) or is a Stage 10 render-block that lets
+  a co-occurring Stage 9 `E_ORIGIN_EXPIRED` win was not pinned. Resolved in
+  rc.29 as the latter (render-block); this implementation already followed that
+  reading -- Stage 8 halts only on the four canary *rejection* codes and never
+  emits `E_CANARY_EXPIRED` as a pipeline reject.
 
 Each chosen reading is documented in a code comment citing the spec passages
-that motivated it.
+that motivated it. AMB-10, AMB-11, and AMB-12 are all now resolved upstream
+(rc.28-rc.29) in line with this implementation.
 
 ## Layout
 
@@ -140,7 +151,7 @@ src/main/java/org/entangled/
   schema/      closed-schema field/block/document validators (Stage 5)
   pipeline/    the 10-stage validation pipeline and per-stage logic
 src/test/java/org/entangled/
-  ConformanceTest    drives all 62 corpus vectors
+  ConformanceTest    drives all 64 corpus vectors
   unit tests for the JSON, JCS, crypto, and schema layers
 src/test/resources/corpus/    the spec conformance corpus, verbatim
 ```
