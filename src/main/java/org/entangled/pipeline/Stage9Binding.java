@@ -204,8 +204,20 @@ public final class Stage9Binding {
             }
         }
         if (ctx.submitBody != null) {
+            JsonValue.Obj submitParsed =
+                    (JsonValue.Obj) JsonParser.parse(new String(ctx.submitBody, StandardCharsets.UTF_8));
+
+            // request_id: the transaction's request_id MUST equal the request_id
+            // the client placed in the submit body (section 02:298, section
+            // 09:139). The transaction's request_id is an independent copied
+            // field, so this is checked separately from request_hash.
+            String declaredRequestId = ((JsonValue.Str) doc.get("request_id")).value();
+            String submitRequestId = ((JsonValue.Str) submitParsed.get("request_id")).value();
+            if (!declaredRequestId.equals(submitRequestId)) {
+                throw new RejectException(DiagnosticCode.E_BIND_REQUEST_ID);
+            }
+
             // request_hash = "sha-256:" || base64url(SHA-256(JCS(submit_body))).
-            JsonValue submitParsed = JsonParser.parse(new String(ctx.submitBody, StandardCharsets.UTF_8));
             byte[] canonical = Jcs.canonicalize(submitParsed);
             String expectedHash = "sha-256:" + base64urlNoPad(Sha.sha256(canonical));
             String declaredHash = ((JsonValue.Str) doc.get("request_hash")).value();
