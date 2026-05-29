@@ -135,6 +135,47 @@ public final class Ed25519 {
         return false;
     }
 
+    // Edwards25519 field prime p = 2^255 - 19, as 32 little-endian bytes. A
+    // canonical public-key encoding has y < p once the high (x-sign) bit of
+    // byte 31 is masked off (RFC 8032 section 5.1.2).
+    private static final byte[] ED25519_FIELD_PRIME_LE =
+            hex("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+
+    /** Little-endian unsigned 32-byte comparison: true iff a &lt; b. */
+    private static boolean ltLe32(byte[] a, byte[] b) {
+        for (int i = 31; i >= 0; i--) {
+            int ai = a[i] & 0xFF;
+            int bi = b[i] & 0xFF;
+            if (ai < bi) {
+                return true;
+            }
+            if (ai > bi) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** True iff the 32-byte encoding is canonical: y &lt; p with the sign bit masked off. */
+    private static boolean isCanonicalEncoding(byte[] publicKey) {
+        byte[] y = publicKey.clone();
+        y[31] &= 0x7F;
+        return ltLe32(y, ED25519_FIELD_PRIME_LE);
+    }
+
+    /**
+     * The section 05 strict profile for a public key that verifies no document
+     * in the current context (e.g. {@code origin.origin_pubkey}, section 05:157,
+     * 05:159): the 32-byte encoding MUST be canonical ({@code y < p}) and MUST
+     * NOT be a small-order point. Mirrors the Rust reference
+     * {@code validate_pubkey_strict}.
+     */
+    public static boolean isStrictProfilePubkey(byte[] publicKey) {
+        return publicKey.length == 32
+                && isCanonicalEncoding(publicKey)
+                && !isSmallOrder(publicKey);
+    }
+
     /** Wrap a raw 32-byte Ed25519 public key in its X.509 SubjectPublicKeyInfo encoding. */
     private static byte[] x509Wrap(byte[] rawKey) {
         byte[] out = new byte[X509_ED25519_PREFIX.length + rawKey.length];

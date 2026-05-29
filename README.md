@@ -1,14 +1,14 @@
 # entangled-api-java
 
 [![CI](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml/badge.svg)](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml)
-[![Conformance](https://img.shields.io/badge/corpus-64%2F64-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
-[![Spec](https://img.shields.io/badge/spec-v1.0--rc.29-blue)](https://github.com/samjanny/entangled)
+[![Conformance](https://img.shields.io/badge/corpus-74%2F74-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
+[![Spec](https://img.shields.io/badge/spec-v1.0--rc.37-blue)](https://github.com/samjanny/entangled)
 [![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
 A Java reference implementation of the **Entangled v1.0** protocol,
 built from the specification at
-[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.29`
+[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.37`
 (its `specs/`, `docs/`, and `corpus/`).
 
 ## Usage
@@ -69,13 +69,16 @@ runnable tests.
 
 ## Status
 
-Passes the full conformance corpus: **64 / 64 vectors** match the recorded
+Passes the full conformance corpus: **74 / 74 vectors** match the recorded
 verdict, diagnostic code, and structured `details` byte-identically.
 
-> Note on vector count: the corpus at `v1.0-rc.29` contains **64** vectors
-> (`corpus.json` `rc_target: 1.0-rc.29`). The two vectors beyond the rc.27
-> set of 62 are the rc.28 additions (`carrier` enum-violation and uppercase
-> `origin.address` field-syntax). This implementation targets the rc.29 corpus.
+> Note on vector count: the corpus at `v1.0-rc.37` contains **74** vectors
+> (`corpus.json` `rc_target: 1.0-rc.37`). This implementation tracks the rc.37
+> corpus, including the rc.30-rc.33 ambiguity-resolution vectors (AMB-13
+> through AMB-17) and the rc.34-rc.37 coverage additions: transaction
+> `request_id` binding, `submit_form` label NFC, the dedicated state-update
+> codes (`E_STATE_VALUE_SIZE` / `E_STATE_TTL`), and carrier link URL host
+> validation.
 
 ## Known limitations
 
@@ -124,7 +127,7 @@ Requires JDK 21 and Maven. The conformance corpus is checked in under
 
 ```sh
 export JAVA_HOME=/path/to/jdk-21
-mvn test                          # all unit tests + the 64-vector conformance suite
+mvn test                          # all unit tests + the 74-vector conformance suite
 mvn test -Dtest=ConformanceTest   # the code-vs-corpus conformance suite only
 ```
 
@@ -166,7 +169,7 @@ src/main/java/org/entangled/
   schema/      closed-schema field/block/document validators (Stage 5)
   pipeline/    the 10-stage validation pipeline and per-stage logic
 src/test/java/org/entangled/
-  ConformanceTest    drives all 64 corpus vectors
+  ConformanceTest    drives all 74 corpus vectors
   unit tests for the JSON, JCS, crypto, and schema layers
 src/test/resources/corpus/    the spec conformance corpus, verbatim
 ```

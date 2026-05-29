@@ -8,6 +8,7 @@ import org.entangled.DiagnosticCode;
 import org.entangled.RejectException;
 import org.entangled.Verdict;
 import org.entangled.crypto.Base64Url;
+import org.entangled.crypto.Ed25519;
 import org.entangled.crypto.Sha;
 import org.entangled.crypto.TorV3Address;
 import org.entangled.json.Jcs;
@@ -53,16 +54,23 @@ public final class Stage9Binding {
 
     /** Tor v3 origin binding: fetched address decodes to a key equal to origin.origin_pubkey. */
     private static void bindOrigin(JsonValue.Obj origin, String fetchedAddress) {
+        String declaredPubkeyB64u = ((JsonValue.Str) origin.get("origin_pubkey")).value();
+        byte[] declaredPubkey = Base64Url.decode(declaredPubkeyB64u, 32);
+        // Section 05:157,159 strict profile for origin.origin_pubkey (AMB-17,
+        // rc.33): a non-canonical or small-order origin key is rejected at Stage 9
+        // origin binding with E_BIND_ORIGIN, since K_origin verifies no document
+        // and so never reaches signature verification.
+        if (!Ed25519.isStrictProfilePubkey(declaredPubkey)) {
+            throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
+        }
         if (fetchedAddress == null) {
-            return; // no fetched origin supplied; binding not evaluated
+            return; // no fetched origin supplied; address binding not evaluated
         }
         String declaredAddress = ((JsonValue.Str) origin.get("address")).value();
-        String declaredPubkeyB64u = ((JsonValue.Str) origin.get("origin_pubkey")).value();
         // Fetched address must equal the declared address (canonical form).
         if (!declaredAddress.equals(fetchedAddress)) {
             throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
         }
-        byte[] declaredPubkey = Base64Url.decode(declaredPubkeyB64u, 32);
         byte[] derived;
         try {
             derived = TorV3Address.decodePublicKey(fetchedAddress);

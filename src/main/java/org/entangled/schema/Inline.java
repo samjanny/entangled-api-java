@@ -38,7 +38,9 @@ public final class Inline {
     public static int validate(JsonValue v, boolean allowLinks, boolean requireNonEmpty) {
         List<JsonValue> elements = Fields.arr(v).elements();
         if (requireNonEmpty && elements.isEmpty()) {
-            throw Fields.syntax();
+            // An empty mandatory inline array is a missing required element
+            // (AMB-13, rc.31): E_SCHEMA_REQUIRED_FIELD, not a length/syntax code.
+            throw new RejectException(DiagnosticCode.E_SCHEMA_REQUIRED_FIELD);
         }
         if (elements.size() > MAX_ELEMENTS) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
@@ -62,9 +64,11 @@ public final class Inline {
             }
             case "link" -> {
                 if (!allowLinks) {
-                    // A link element where only text is permitted is a not-permitted
-                    // inline element; treat as an enum violation on the element kind.
-                    throw new RejectException(DiagnosticCode.E_SCHEMA_ENUM_VIOLATION);
+                    // A link element where only text is permitted (link.label,
+                    // submit_form.label) is a kind appearing where it is not
+                    // permitted (AMB-14, rc.31): E_SCHEMA_BLOCK_NOT_PERMITTED, not
+                    // E_SCHEMA_ENUM_VIOLATION.
+                    throw new RejectException(DiagnosticCode.E_SCHEMA_BLOCK_NOT_PERMITTED);
                 }
                 Closed.check(e, Set.of("kind", "value", "marks", "target"),
                         Set.of("kind", "value", "marks", "target"));

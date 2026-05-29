@@ -95,7 +95,10 @@ public final class Blocks {
         Closed.check(b, Set.of("kind", "ordered", "items"), Set.of("kind", "ordered", "items"));
         Fields.bool(b.get("ordered"));
         List<JsonValue> items = Fields.arr(b.get("items")).elements();
-        if (items.isEmpty() || items.size() > 64) {
+        if (items.isEmpty()) {
+            throw new RejectException(DiagnosticCode.E_SCHEMA_REQUIRED_FIELD);
+        }
+        if (items.size() > 64) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
         }
         int total = 0;
@@ -148,7 +151,10 @@ public final class Blocks {
         Inline.validate(b.get("label"), false, true);
         Fields.path(Fields.str(b.get("submit_to")));
         List<JsonValue> fields = Fields.arr(b.get("fields")).elements();
-        if (fields.isEmpty() || fields.size() > 16) {
+        if (fields.isEmpty()) {
+            throw new RejectException(DiagnosticCode.E_SCHEMA_REQUIRED_FIELD);
+        }
+        if (fields.size() > 16) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
         }
         Set<String> names = new HashSet<>();
@@ -206,7 +212,10 @@ public final class Blocks {
 
     private static void selectOptions(JsonValue optionsValue) {
         List<JsonValue> options = Fields.arr(optionsValue).elements();
-        if (options.isEmpty() || options.size() > 32) {
+        if (options.isEmpty()) {
+            throw new RejectException(DiagnosticCode.E_SCHEMA_REQUIRED_FIELD);
+        }
+        if (options.size() > 32) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
         }
         Set<String> values = new HashSet<>();

@@ -1,6 +1,7 @@
 package org.entangled.json;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -178,11 +179,15 @@ public final class JsonParser {
             } else {
                 sb.append(c);
             }
-            if (sb.length() > MAX_STRING_LENGTH) {
-                throw new RejectException(DiagnosticCode.E_PARSE_STRING_LENGTH);
-            }
         }
-        return sb.toString();
+        String value = sb.toString();
+        // section 04 (AMB-15, rc.30): the 100 KiB string cap is measured in
+        // UTF-8 wire bytes, not UTF-16 code units. The Stage 2 byte cap bounds
+        // the total input, so the value is fully built before this final check.
+        if (value.getBytes(StandardCharsets.UTF_8).length > MAX_STRING_LENGTH) {
+            throw new RejectException(DiagnosticCode.E_PARSE_STRING_LENGTH);
+        }
+        return value;
     }
 
     /**

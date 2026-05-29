@@ -299,12 +299,20 @@ def make_content(*, runtime_priv, path="/articles/first-post",
 
 def make_transaction(*, runtime_priv, in_response_to="/contact",
                      submit_body=None, blocks=None,
-                     state_updates=None) -> tuple[dict, dict]:
+                     state_updates=None,
+                     request_id_override: str | None = None) -> tuple[dict, dict]:
     """Build and sign a transaction document.
 
     Returns (transaction_doc, submit_body_used). The submit body is needed by
     the client to verify request_hash; vectors carrying transactions also
     carry the corresponding submit body.
+
+    When `request_id_override` is set, the transaction document carries that
+    `request_id` while the submit body keeps its own (real) `request_id`, so
+    `request_hash` still matches the recorded submit body. This isolates a
+    `request_id` binding mismatch (E_BIND_REQUEST_ID): the transaction's
+    `request_id` is an independent copied field, not part of the hashed submit
+    body, so the mismatch does not perturb the request_hash check.
     """
     if submit_body is None:
         submit_body = {
@@ -326,11 +334,16 @@ def make_transaction(*, runtime_priv, in_response_to="/contact",
         state_updates = []
     submit_canonical = jcs(submit_body)
     request_hash = sha256_b64u(submit_canonical)
+    tx_request_id = (
+        request_id_override
+        if request_id_override is not None
+        else submit_body["request_id"]
+    )
     payload = {
         "spec_version": "1.0",
         "kind": "transaction",
         "in_response_to": in_response_to,
-        "request_id": submit_body["request_id"],
+        "request_id": tx_request_id,
         "request_hash": request_hash,
         "state_updates": state_updates,
         "blocks": blocks,
@@ -919,6 +932,131 @@ def negative_vectors(keys) -> list[dict]:
         context={"fetched_origin_address": canonical_addr},
     ))
 
+    # ---- 146-schema-empty-array (Stage 5, E_SCHEMA_REQUIRED_FIELD; AMB-13) ----
+    #
+    # A mandatory array that is present but empty. §02:186 requires content
+    # `blocks` to contain at least one block; an empty `blocks: []` does not
+    # meet the minimum element count. Per AMB-13 (rc.31) this is
+    # E_SCHEMA_REQUIRED_FIELD (the required element is absent), not
+    # E_SCHEMA_FIELD_LENGTH (which is for exceeding a maximum). The document
+    # is signed correctly over the empty-blocks payload so the signature
+    # verifies and the empty-array violation is the only live Stage 5
+    # violation.
+    c_empty = make_content(runtime_priv=rp, path="/articles/empty", blocks=[])
+    out.append(vec(
+        "146-schema-empty-array",
+        kind="content",
+        description=(
+            "Content document whose mandatory `blocks` array is present but "
+            "empty. §02:186 requires at least one block; per AMB-13 an empty "
+            "mandatory array is E_SCHEMA_REQUIRED_FIELD (the required element "
+            "is absent), not E_SCHEMA_FIELD_LENGTH. Signed correctly so the "
+            "empty-array violation is the only live Stage 5 violation."
+        ),
+        spec_refs=["§02", "§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_REQUIRED_FIELD",
+        body_obj=c_empty,
+        context={
+            "fetched_path": c_empty["path"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+        },
+    ))
+
+    # ---- 147-schema-nested-link (Stage 5, E_SCHEMA_BLOCK_NOT_PERMITTED;
+    #      AMB-14) ----
+    #
+    # A `link` block whose `label` inline array contains an inline `link`
+    # element. §03:654 forbids nested links in a link label. Per AMB-14
+    # (rc.31) the violation is an inline element of an enumerated kind
+    # appearing where that kind is not permitted: E_SCHEMA_BLOCK_NOT_PERMITTED,
+    # not E_SCHEMA_ENUM_VIOLATION. Signed correctly so the nested-link
+    # violation is the only live Stage 5 violation.
+    c_nested = make_content(
+        runtime_priv=rp, path="/articles/nested-link",
+        blocks=[{
+            "kind": "link",
+            "label": [
+                {"kind": "text", "value": "see ", "marks": []},
+                {
+                    "kind": "link",
+                    "value": "here",
+                    "marks": [],
+                    "target": {"kind": "same_site", "path": "/articles/foo"},
+                },
+            ],
+            "target": {"kind": "same_site", "path": "/articles/bar"},
+        }],
+    )
+    out.append(vec(
+        "147-schema-nested-link",
+        kind="content",
+        description=(
+            "Content document with a `link` block whose `label` contains an "
+            "inline `link` element. §03:654 forbids nested links in a link "
+            "label; per AMB-14 this is E_SCHEMA_BLOCK_NOT_PERMITTED (an "
+            "inline element kind appearing where it is not permitted), not "
+            "E_SCHEMA_ENUM_VIOLATION. Signed correctly so the nested-link "
+            "violation is the only live Stage 5 violation."
+        ),
+        spec_refs=["§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_BLOCK_NOT_PERMITTED",
+        body_obj=c_nested,
+        context={
+            "fetched_path": c_nested["path"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+        },
+    ))
+
+    # ---- 148/149: transaction state_updates hard-range checks ----
+    # A transaction "set" state update is validated standalone at Stage 5
+    # (no manifest policy needed): a value over the 4096-byte hard ceiling is
+    # E_STATE_VALUE_SIZE (§11:286, §07:170), and a ttl outside the 300..7776000
+    # hard range is E_STATE_TTL (§11:287, §07:279). The dedicated state codes
+    # apply, not the generic E_SCHEMA_FIELD_LENGTH / E_SCHEMA_FIELD_RANGE.
+    t_state_value, _ = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "set",
+            "namespace": "session",
+            "key": "data",
+            "value": "x" * 4097,
+            "ttl": 86400,
+        }],
+    )
+    out.append(vec(
+        "148-state-value-size",
+        kind="transaction",
+        description="Transaction whose state_updates set operation carries a value of 4097 raw UTF-8 bytes, one over the 4096-byte protocol hard ceiling (§07). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_VALUE_SIZE (§11:286), the dedicated state code, not the generic E_SCHEMA_FIELD_LENGTH. Signed by K_runtime; namespace, key, and ttl are valid, so the oversized value is the only live violation.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_STATE_VALUE_SIZE",
+        body_obj=t_state_value,
+        context={"expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    t_state_ttl, _ = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "set",
+            "namespace": "session",
+            "key": "data",
+            "value": "ok",
+            "ttl": 7776001,
+        }],
+    )
+    out.append(vec(
+        "149-state-ttl",
+        kind="transaction",
+        description="Transaction whose state_updates set operation carries a ttl of 7776001 seconds, one over the 7776000-second (90-day) hard upper bound (§07:279). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_TTL (§11:287), the dedicated state code, not the generic E_SCHEMA_FIELD_RANGE. Signed by K_runtime; value, namespace, and key are valid, so the out-of-range ttl is the only live violation.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_STATE_TTL",
+        body_obj=t_state_ttl,
+        context={"expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
     # ---- signature: modified payload, wrong length ----
     m_tamper = dict(m)
     # Modify a non-sig field after signing. The signature no longer matches.
@@ -1095,6 +1233,35 @@ def negative_vectors(keys) -> list[dict]:
         extra_files={
             "submit_body.json": json.dumps(
                 sb_tampered, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
+    ))
+
+    # transaction with mismatched request_id
+    # in_response_to and request_hash both match the real (untampered) submit
+    # body, so E_BIND_REQUEST_ID is the only live Stage 9 violation. The
+    # transaction's request_id is an independent copied field, not part of the
+    # hashed submit body, so the mismatch isolates from E_BIND_REQUEST_HASH.
+    t_rid, sb_rid = make_transaction(
+        runtime_priv=rp,
+        request_id_override="BAECAwQFBgcICQoLDA0ODw",
+    )
+    out.append(vec(
+        "173-bind-request-id-mismatch",
+        kind="transaction",
+        description="Transaction document whose request_id (BAECAwQFBgcICQoLDA0ODw) differs from the request_id the client placed in the submit body (AAECAwQFBgcICQoLDA0ODw). in_response_to matches the submit path and request_hash matches the recorded (untampered) submit body, so the request_id binding is the only live Stage 9 violation. Rejected with E_BIND_REQUEST_ID. The transaction's request_id is an independent copied field, not part of the hashed submit body, so it isolates cleanly from E_BIND_REQUEST_HASH.",
+        spec_refs=["§02", "§09"],
+        verdict="reject",
+        diagnostic="E_BIND_REQUEST_ID",
+        body_obj=t_rid,
+        context={
+            "submit_path": t_rid["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/173-bind-request-id-mismatch/submit_body.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_rid, separators=(",", ":"), ensure_ascii=False
             ).encode("utf-8"),
         },
     ))
@@ -1371,6 +1538,41 @@ def negative_vectors(keys) -> list[dict]:
             b'{"title":"t","published_at":"2026-05-07T00:00:00Z"},'
             b'"blocks":[{"kind":"code_block","language":"text","content":"'
             + long_str + b'"}],"sig":"' + (b"A" * 86) + b'"}'
+        ),
+    ))
+
+    # ---- 116-parse-string-length-utf8-unit (Stage 3, E_PARSE_STRING_LENGTH;
+    #      AMB-15) ----
+    # The 100 KiB Stage 3 string cap is counted in UTF-8 wire bytes (§02,
+    # §10; AMB-15 / rc.30), not UTF-16 code units. This code_block content is
+    # 30000 repetitions of U+1F600 (a non-BMP code point: 4 UTF-8 bytes, but
+    # only 2 UTF-16 code units each) = 120000 UTF-8 bytes (over the 102400
+    # cap) but 60000 UTF-16 code units (under it). An implementation counting
+    # UTF-8 bytes REJECTS with E_PARSE_STRING_LENGTH; one counting UTF-16 code
+    # units would wrongly accept. The body stays well under the 1 MiB Stage 2
+    # cap, so Stage 2 passes and Stage 3 fires. U+1F600 is not a control
+    # character and is already NFC, so no earlier check pre-empts the cap.
+    emoji = b"\xf0\x9f\x98\x80" * 30000  # U+1F600 x 30000 = 120000 UTF-8 bytes
+    out.append(vec(
+        "116-parse-string-length-utf8-unit",
+        kind="content",
+        description=(
+            "Content document whose code_block content is 30000 U+1F600 "
+            "code points = 120000 UTF-8 wire bytes (over the 100 KiB Stage 3 "
+            "string cap) but only 60000 UTF-16 code units (under it). Per "
+            "§02/§10 (AMB-15) the cap is counted in UTF-8 wire bytes, so this "
+            "is rejected with E_PARSE_STRING_LENGTH; an implementation "
+            "counting UTF-16 code units would wrongly accept. Body is under "
+            "the 1 MiB Stage 2 cap so Stage 3 fires."
+        ),
+        spec_refs=["§02", "§04", "§10"],
+        verdict="reject",
+        diagnostic="E_PARSE_STRING_LENGTH",
+        body=(
+            b'{"spec_version":"1.0","kind":"content","path":"/x","meta":'
+            b'{"title":"t","published_at":"2026-05-07T00:00:00Z"},'
+            b'"blocks":[{"kind":"code_block","language":"text","content":"'
+            + emoji + b'"}],"sig":"' + (b"A" * 86) + b'"}'
         ),
     ))
 
@@ -1682,6 +1884,49 @@ def negative_vectors(keys) -> list[dict]:
         context={"fetched_origin_address": wrong_origin_address},
     ))
 
+    # ---- 179-bind-origin-small-order-pubkey (Stage 9, E_BIND_ORIGIN;
+    #      AMB-17) ----
+    # origin.origin_pubkey is the encoded identity point SMALL_ORDER_A
+    # (small-order, order 1). origin.address is derived from that same key
+    # so the Tor v3 address-to-key binding MATCHES (the address decodes to
+    # the declared origin_pubkey) -- isolating the violation to the §05
+    # public-key validity profile: K_origin.pub is a small-order point. Per
+    # §05:159 the strict profile applies to K_origin.pub; AMB-17 (rc.33)
+    # pins enforcement at Stage 9 origin binding with E_BIND_ORIGIN (K_origin
+    # verifies no document, so E_SIG_VERIFICATION has no trigger here). The
+    # manifest is signed correctly by K_publisher so the small-order origin
+    # key is the only live violation.
+    m_179 = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    del m_179["sig"]
+    smallorder_addr = onion_address(SMALL_ORDER_A)
+    m_179["origin"]["origin_pubkey"] = b64u(SMALL_ORDER_A)
+    m_179["origin"]["address"] = smallorder_addr
+    m_179["sig"] = sign(pp, CTX_MANIFEST, m_179)
+    out.append(vec(
+        "179-bind-origin-small-order-pubkey",
+        kind="manifest",
+        description=(
+            "Manifest whose origin.origin_pubkey is a small-order point "
+            "(the encoded identity point), with origin.address derived from "
+            "that same key so the Tor v3 address-to-key binding matches and "
+            "the only violation is that K_origin.pub fails the §05 "
+            "small-order rejection. Per §05:159 the strict profile applies "
+            "to K_origin.pub; AMB-17 pins enforcement at Stage 9 origin "
+            "binding with E_BIND_ORIGIN (K_origin verifies no document, so "
+            "E_SIG_VERIFICATION has no trigger). Signed correctly by "
+            "K_publisher so the small-order origin key is the only live "
+            "violation."
+        ),
+        spec_refs=["§05", "§09", "§11"],
+        verdict="reject",
+        diagnostic="E_BIND_ORIGIN",
+        body_obj=m_179,
+        context={"fetched_origin_address": smallorder_addr},
+    ))
+
     # ---- 176-origin-invalid (E_ORIGIN_INVALID) ----
     # Manifest whose origin.not_after equals canary.issued_at. §06 requires
     # not_after to be strictly later than canary.issued_at; equal violates
@@ -1848,6 +2093,40 @@ def negative_vectors(keys) -> list[dict]:
         diagnostic="E_SIG_VERIFICATION",
         body_obj=m_157,
         context={"fetched_origin_address": m_157["origin"]["address"]},
+    ))
+
+    # ---- 158-link-carrier-url-non-onion-host (Stage 5, E_SCHEMA_FIELD_SYNTAX) ----
+    # A carrier link target URL must have a host that is a valid carrier address
+    # for the declared carrier; for tor-v3 that is a 56-char onion address plus
+    # ".onion" (§03:584). This content document's carrier target uses a clearnet
+    # host (example.com) with otherwise-valid URL syntax, so the only live Stage
+    # 5 violation is the non-onion host.
+    c_carrier_host = make_content(
+        runtime_priv=rp,
+        path="/external",
+        title="External link",
+        blocks=[{
+            "kind": "link",
+            "label": [{"kind": "text", "value": "External site", "marks": []}],
+            "target": {
+                "kind": "carrier",
+                "carrier": "tor-v3",
+                "url": "http://example.com/path",
+            },
+        }],
+    )
+    out.append(vec(
+        "158-link-carrier-url-non-onion-host",
+        kind="content",
+        description="Content document with a link block whose carrier target URL (http://example.com/path) has a clearnet host instead of a tor-v3 onion address. Per §03:584 a carrier URL host MUST be a valid carrier address for the declared carrier; for tor-v3, a 56-character onion address followed by .onion. The URL is otherwise well-formed (http:// scheme, valid RFC 3986 characters, within the length cap), so the non-onion host is the only live Stage 5 violation. Rejected with E_SCHEMA_FIELD_SYNTAX.",
+        spec_refs=["§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_FIELD_SYNTAX",
+        body_obj=c_carrier_host,
+        context={
+            "fetched_path": c_carrier_host["path"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+        },
     ))
 
     # ---- 177-origin-invalid-beyond-5y (E_ORIGIN_INVALID, second reason) ----
@@ -2107,6 +2386,42 @@ def negative_vectors(keys) -> list[dict]:
         },
     ))
 
+    # ---- 186-canary-malformed-timestamp (Stage 8, E_CANARY_INVALID; AMB-16) ----
+    #
+    # Manifest whose canary.next_expected is a syntactically malformed
+    # timestamp ("garbage" -- a valid JSON string, but not the 20-char
+    # RFC 3339 form). Per §08 the canary Invalid state explicitly includes
+    # "invalid timestamp syntax", and AMB-16 (rc.32) pins this to Stage 8
+    # E_CANARY_INVALID, not a generic Stage 5 schema code. The manifest is
+    # signed correctly over the malformed-timestamp payload so the signature
+    # verifies (Stage 6 passes) and the pipeline reaches Stage 8, where the
+    # malformed canary timestamp is the only live violation. Distinct from
+    # vector 182 (E_CANARY_INVALID for an interval-bound violation).
+    m_186 = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        next_expected="garbage",
+    )
+    out.append(vec(
+        "186-canary-malformed-timestamp",
+        kind="manifest",
+        description=(
+            "Manifest whose canary.next_expected is a syntactically "
+            "malformed timestamp (\"garbage\", not the RFC 3339 20-char "
+            "form). Per §08 the canary Invalid state includes invalid "
+            "timestamp syntax; AMB-16 pins this to Stage 8 E_CANARY_INVALID, "
+            "not a generic Stage 5 schema code. Signed correctly so Stage 6 "
+            "passes and the pipeline reaches Stage 8, where the malformed "
+            "canary timestamp is the only live violation. Distinct from "
+            "vector 182 (interval-bound E_CANARY_INVALID)."
+        ),
+        spec_refs=["§08", "§11"],
+        verdict="reject",
+        diagnostic="E_CANARY_INVALID",
+        body_obj=m_186,
+        context={"fetched_origin_address": m_186["origin"]["address"]},
+    ))
+
     # ---- 191-unicode-nfd-freshness-proof (Stage 5, E_SCHEMA_FIELD_SYNTAX) ----
     # Parity with vector 190 (statement NFD): manifest whose
     # canary.freshness_proof contains a decomposed combining mark
@@ -2147,6 +2462,50 @@ def negative_vectors(keys) -> list[dict]:
         diagnostic="E_SCHEMA_FIELD_SYNTAX",
         body_obj=m_191_payload,
         context={"fetched_origin_address": m_191_payload["origin"]["address"]},
+    ))
+
+    # ---- 192-unicode-nfd-submit-label (Stage 5, E_SCHEMA_FIELD_SYNTAX) ----
+    # Content document with a submit_form whose submit_label is in NFD
+    # ("Cafe" + U+0301 combining acute) rather than precomposed NFC. Per
+    # §04:159 the submit_form form-level labels are user-visible and MUST be
+    # NFC; a non-NFC value is rejected at schema validation with
+    # E_SCHEMA_FIELD_SYNTAX before signature verification (§04:167, §10).
+    # Every other field is valid and NFC, so the NFD submit_label is the only
+    # live Stage 5 violation.
+    c_nfd_submit_label = make_content(
+        runtime_priv=rp,
+        path="/contact-form",
+        title="Contact",
+        blocks=[{
+            "kind": "submit_form",
+            "label": [
+                {"kind": "text", "value": "Contact us", "marks": []},
+            ],
+            "submit_to": "/contact",
+            "fields": [
+                {
+                    "kind": "textarea",
+                    "name": "message",
+                    "label": "Message",
+                    "required": True,
+                    "max_length": 1000,
+                }
+            ],
+            "submit_label": "Café",  # NFD: "Cafe" + U+0301 combining acute
+        }],
+    )
+    out.append(vec(
+        "192-unicode-nfd-submit-label",
+        kind="content",
+        description="Content document whose submit_form.submit_label is in NFD (\"Cafe\" + U+0301 combining acute) rather than the precomposed NFC form. Per §04:159 the submit_form form-level labels are user-visible and MUST be NFC; a non-NFC value is rejected at schema validation with E_SCHEMA_FIELD_SYNTAX before signature verification. Every other field is valid and NFC, so the NFD submit_label is the only live Stage 5 violation.",
+        spec_refs=["§03", "§04"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_FIELD_SYNTAX",
+        body_obj=c_nfd_submit_label,
+        context={
+            "fetched_path": c_nfd_submit_label["path"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+        },
     ))
 
     # ---- 201-migration-chain-cycle (E_MIGRATION_INVALID chain_cycle) ----
@@ -2360,7 +2719,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.29",
+        "rc_target": "1.0-rc.37",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,

@@ -313,7 +313,9 @@ public final class DocumentSchema {
     private static void validateBlocks(JsonValue.Arr blocks, boolean transaction, int maxBlocks) {
         List<JsonValue> list = blocks.elements();
         if (list.isEmpty()) {
-            throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
+            // An empty mandatory blocks array is a missing required element
+            // (AMB-13, rc.31): E_SCHEMA_REQUIRED_FIELD, not E_SCHEMA_FIELD_LENGTH.
+            throw new RejectException(DiagnosticCode.E_SCHEMA_REQUIRED_FIELD);
         }
         if (list.size() > maxBlocks) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
