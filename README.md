@@ -16,10 +16,11 @@ built solely from the specification at
 This is a *second, isolated reading* of the Entangled specification. The existing
 Rust implementation shares an author with the spec, so its conformance does not,
 by itself, show that the spec reads unambiguously. This implementation was
-written from scratch, by a different reader, **without reference to any other
-implementation** of the protocol -- only the specification text and the
-conformance corpus. Where the two implementations diverge, that divergence is a
-signal about the spec, which is the point of the exercise.
+written from scratch **without reference to any other implementation** of the
+protocol -- only the specification text and the conformance corpus. The
+isolation is from the other implementation, not from its author. Where the two
+implementations diverge, that divergence is a signal about the spec, which is the
+point of the exercise.
 
 ## Status
 
