@@ -1,5 +1,6 @@
 package org.entangled.schema;
 
+import java.math.BigInteger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -337,10 +338,20 @@ public final class DocumentSchema {
                     Fields.slug(Fields.str(op.get("namespace")), 64);
                     Fields.slug(Fields.str(op.get("key")), 64);
                     String value = Fields.str(op.get("value"));
+                    // section 11:286 / section 07:170: a state set value over the
+                    // 4096-byte hard ceiling is E_STATE_VALUE_SIZE, not the generic
+                    // field-length code.
                     if (Fields.utf8Len(value) > 4096) {
-                        throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
+                        throw new RejectException(DiagnosticCode.E_STATE_VALUE_SIZE);
                     }
-                    Fields.integerInRange(op.get("ttl"), 300, 7776000);
+                    // section 11:287 / section 07:279: a state set ttl outside the
+                    // 300..7776000 hard range is E_STATE_TTL. The integer-grammar and
+                    // type checks stay generic (E_SCHEMA_NON_INTEGER / E_SCHEMA_FIELD_TYPE).
+                    BigInteger ttl = Fields.integer(op.get("ttl"));
+                    if (ttl.compareTo(BigInteger.valueOf(300)) < 0
+                            || ttl.compareTo(BigInteger.valueOf(7776000)) > 0) {
+                        throw new RejectException(DiagnosticCode.E_STATE_TTL);
+                    }
                 }
                 case "delete" -> {
                     Closed.check(op, Set.of("op", "namespace", "key"),
