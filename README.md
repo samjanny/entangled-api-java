@@ -77,6 +77,46 @@ verdict, diagnostic code, and structured `details` byte-identically.
 > set of 62 are the rc.28 additions (`carrier` enum-violation and uppercase
 > `origin.address` field-syntax). This implementation targets the rc.29 corpus.
 
+## Known limitations
+
+### Content index (`content_root`) not yet validated
+
+This implementation does **not** yet implement the section 10 content-index
+flow. When a manifest carries `content_root`, a conforming client must fetch
+`/content_index.json` from the same carrier origin, verify its SHA-256 against
+the `content_root` committed in the manifest, and then verify every content
+document's `(seq, hash)` against that index before rendering. This library
+validates `content_root` only for syntax (a `sha-256:` digest in the manifest
+schema) and does not perform the fetch, the hash binding, or the per-document
+`seq` / `hash` checks. The section 11 codes for this flow
+(`E_CONTENT_INDEX_FETCH_FAILED`, `E_CONTENT_INDEX_HASH_MISMATCH`,
+`E_CONTENT_INDEX_INVALID`, `E_CONTENT_SEQ_MISSING`, `E_CONTENT_SEQ_ROLLBACK`,
+`E_CONTENT_SEQ_UNCOMMITTED`, `E_CONTENT_HASH_MISMATCH`) are present in
+`DiagnosticCode` but are not yet reachable.
+
+**Security implication.** The content index is the defense against a
+`K_runtime`-only attacker: an adversary who has compromised the runtime signing
+key but not the publisher key. Because `content_root` is signed by
+`K_publisher`, it binds the set of valid content documents `(path, seq, hash)`
+under the publisher's signature, which a runtime-key-only attacker cannot forge.
+A client that verifies the index rejects an older signed version of a document
+(`E_CONTENT_SEQ_ROLLBACK`), a forged higher-sequence update
+(`E_CONTENT_SEQ_UNCOMMITTED`), and a substituted body at the committed sequence
+(`E_CONTENT_HASH_MISMATCH`); section 10 treats a manifest that commits to a
+content index but cannot deliver a valid one as a hard security failure,
+"indistinguishable from server compromise". Without this flow, a site that
+declares `content_root` is rendered by this library with content protected only
+by the `K_runtime` signature, so a runtime-key-only attacker could serve
+rolled-back or forged content that a content-index-validating client would
+reject. Sites that do not declare `content_root` are unaffected.
+
+**Recommendation.** If you need content-index enforcement, use the Rust
+reference implementation
+([`samjanny/entangled-api`](https://github.com/samjanny/entangled-api)), which
+implements the full flow, or do not rely on this library to render content from
+sites that declare `content_root` until the feature lands. Tracked as a future
+tranche (see the repository issues).
+
 ## Building and testing
 
 Requires JDK 21 and Maven. The conformance corpus is checked in under
