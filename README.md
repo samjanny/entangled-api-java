@@ -1,5 +1,11 @@
 # entangled-api-java
 
+[![CI](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml/badge.svg)](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml)
+[![Conformance](https://img.shields.io/badge/corpus-62%2F62-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
+[![Spec](https://img.shields.io/badge/spec-v1.0--rc.27-blue)](https://github.com/samjanny/entangled)
+[![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
+
 An independent Java reference implementation of the **Entangled v1.0** protocol,
 built solely from the specification at
 [`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.27`
@@ -95,4 +101,11 @@ src/test/resources/corpus/    the spec conformance corpus, verbatim
 
 ## License
 
-Follows the licensing of the upstream specification corpus it is built against.
+Dual-licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. See [LICENSE.md](LICENSE.md) for details. The bundled
+conformance corpus under `src/test/resources/corpus` is copied verbatim from the
+upstream specification and retains the licensing of that project.

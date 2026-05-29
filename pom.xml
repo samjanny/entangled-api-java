@@ -11,6 +11,20 @@
 
   <name>entangled-api-java</name>
   <description>Independent Java reference implementation of the Entangled v1.0 protocol, built from the specification.</description>
+  <url>https://github.com/samjanny/entangled-api-java</url>
+
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+      <distribution>repo</distribution>
+    </license>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
