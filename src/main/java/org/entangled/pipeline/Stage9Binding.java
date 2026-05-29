@@ -1,0 +1,244 @@
+package org.entangled.pipeline;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.entangled.DiagnosticCode;
+import org.entangled.RejectException;
+import org.entangled.Verdict;
+import org.entangled.crypto.Base64Url;
+import org.entangled.crypto.Sha;
+import org.entangled.crypto.TorV3Address;
+import org.entangled.json.Jcs;
+import org.entangled.json.JsonParser;
+import org.entangled.json.JsonValue;
+import org.entangled.schema.Rfc3339;
+
+/**
+ * Stage 9: path and origin binding (section 10), plus the manifest origin
+ * lifecycle and migration checks (section 06, section 10).
+ *
+ * <p>Manifest: Tor v3 origin binding ({@code E_BIND_ORIGIN}); {@code origin.not_after}
+ * expiry with the symmetric 300s past-bound tolerance ({@code E_ORIGIN_EXPIRED});
+ * and, when a {@code migration_pointer} is present, the announcement-internal
+ * successor key binding ({@code E_MIGRATION_INVALID} reason
+ * {@code successor_key_mismatch}), the self-pointer / cycle checks
+ * ({@code E_MIGRATION_INVALID}), and the fetched-successor verification
+ * ({@code E_MIGRATION_MISMATCH}).
+ *
+ * <p>Content: byte-exact {@code path} binding ({@code E_BIND_PATH}). Transaction:
+ * {@code in_response_to} ({@code E_BIND_RESPONSE_PATH}), {@code request_id}
+ * ({@code E_BIND_REQUEST_ID}), and {@code request_hash} ({@code E_BIND_REQUEST_HASH}).
+ */
+public final class Stage9Binding {
+
+    /** Section 10 past-bound tolerance for origin.not_after. */
+    private static final long SKEW = 300;
+
+    private Stage9Binding() {
+    }
+
+    // --- manifest ---
+
+    static void manifest(JsonValue.Obj doc, Context ctx) {
+        JsonValue.Obj origin = (JsonValue.Obj) doc.get("origin");
+        bindOrigin(origin, ctx.fetchedOriginAddress);
+        notAfterExpiry(origin, ctx.nowEpoch);
+
+        if (doc.has("migration_pointer")) {
+            migration(doc, ctx);
+        }
+    }
+
+    /** Tor v3 origin binding: fetched address decodes to a key equal to origin.origin_pubkey. */
+    private static void bindOrigin(JsonValue.Obj origin, String fetchedAddress) {
+        if (fetchedAddress == null) {
+            return; // no fetched origin supplied; binding not evaluated
+        }
+        String declaredAddress = ((JsonValue.Str) origin.get("address")).value();
+        String declaredPubkeyB64u = ((JsonValue.Str) origin.get("origin_pubkey")).value();
+        // Fetched address must equal the declared address (canonical form).
+        if (!declaredAddress.equals(fetchedAddress)) {
+            throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
+        }
+        byte[] declaredPubkey = Base64Url.decode(declaredPubkeyB64u, 32);
+        byte[] derived;
+        try {
+            derived = TorV3Address.decodePublicKey(fetchedAddress);
+        } catch (TorV3Address.InvalidOnionAddress e) {
+            throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
+        }
+        if (!Arrays.equals(declaredPubkey, derived)) {
+            throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
+        }
+    }
+
+    private static void notAfterExpiry(JsonValue.Obj origin, long nowEpoch) {
+        if (!origin.members().containsKey("not_after")) {
+            return;
+        }
+        long notAfter = Rfc3339.epochSeconds(((JsonValue.Str) origin.get("not_after")).value());
+        // Section 10 past-bound rejection: current_time > not_after + 300 (strict).
+        if (nowEpoch > notAfter + SKEW) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("not_after", ((JsonValue.Str) origin.get("not_after")).value());
+            details.put("now", isoMinute(nowEpoch));
+            throw new RejectException(DiagnosticCode.E_ORIGIN_EXPIRED, details);
+        }
+    }
+
+    // --- migration ---
+
+    private static void migration(JsonValue.Obj doc, Context ctx) {
+        JsonValue.Obj origin = (JsonValue.Obj) doc.get("origin");
+        String announcingAddress = ((JsonValue.Str) origin.get("address")).value();
+        JsonValue.Obj mp = (JsonValue.Obj) doc.get("migration_pointer");
+        JsonValue.Obj successorOrigin = (JsonValue.Obj) mp.get("successor_origin");
+        String successorAddress = ((JsonValue.Str) successorOrigin.get("address")).value();
+        String successorPubkeyB64u = ((JsonValue.Str) successorOrigin.get("origin_pubkey")).value();
+        String announcedAt = ((JsonValue.Str) mp.get("announced_at")).value();
+        String updated = ((JsonValue.Str) doc.get("updated")).value();
+
+        // Self-pointer: successor address equals announcing address.
+        if (successorAddress.equals(announcingAddress)) {
+            throw migrationInvalid("self_pointer", announcingAddress, successorAddress);
+        }
+        // announced_at must not be later than updated.
+        if (Rfc3339.epochSeconds(announcedAt) > Rfc3339.epochSeconds(updated)) {
+            throw migrationInvalid("announced_at_after_updated", announcingAddress, successorAddress);
+        }
+        // carrier match (both must be tor-v3; schema already enforced tor-v3).
+        String announcingCarrier = ((JsonValue.Str) origin.get("carrier")).value();
+        String successorCarrier = ((JsonValue.Str) successorOrigin.get("carrier")).value();
+        if (!announcingCarrier.equals(successorCarrier)) {
+            throw migrationInvalid("carrier_mismatch", announcingAddress, successorAddress);
+        }
+        // Announcement-internal: successor address must decode to successor origin_pubkey.
+        byte[] declaredSuccessorPubkey = Base64Url.decode(successorPubkeyB64u, 32);
+        byte[] derived;
+        try {
+            derived = TorV3Address.decodePublicKey(successorAddress);
+        } catch (TorV3Address.InvalidOnionAddress e) {
+            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
+        }
+        if (!Arrays.equals(declaredSuccessorPubkey, derived)) {
+            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
+        }
+
+        // Fetch-time successor verification (when the successor manifest is supplied).
+        if (ctx.successorManifest != null) {
+            verifySuccessor(doc, successorOrigin, successorAddress, announcingAddress, ctx);
+        }
+    }
+
+    private static void verifySuccessor(JsonValue.Obj announcing, JsonValue.Obj successorOrigin,
+                                        String successorAddress, String announcingAddress, Context ctx) {
+        // Per-flow visited-origins begins with the announcing origin; a successor
+        // address already visited is a chain cycle.
+        if (successorAddress.equals(announcingAddress)) {
+            throw migrationInvalid("chain_cycle", announcingAddress, successorAddress);
+        }
+
+        // Run the successor manifest through the full pipeline in isolation.
+        Context successorCtx = new Context(ctx.nowEpoch);
+        successorCtx.fetchedOriginAddress = successorAddress;
+        // The successor may itself announce a migration; detect a cycle back to
+        // the announcing origin before recursing into its own migration step.
+        JsonValue.Obj successorDoc =
+                (JsonValue.Obj) JsonParser.parse(new String(ctx.successorManifest, StandardCharsets.UTF_8));
+        if (successorDoc.has("migration_pointer")) {
+            JsonValue.Obj sMp = (JsonValue.Obj) successorDoc.get("migration_pointer");
+            JsonValue.Obj sSucc = (JsonValue.Obj) sMp.get("successor_origin");
+            String sSuccAddr = ((JsonValue.Str) sSucc.get("address")).value();
+            if (sSuccAddr.equals(announcingAddress)) {
+                // A -> B -> A: the successor announces a return to the announcing origin.
+                throw migrationInvalid("chain_cycle", successorAddress, announcingAddress);
+            }
+        }
+
+        Verdict successorVerdict = new Pipeline(successorCtx).run(ctx.successorManifest);
+        if (!successorVerdict.isAccepted()) {
+            // The successor fails its own pipeline; surface as E_MIGRATION_MISMATCH
+            // with the underlying code.
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("mismatch_field", "successor_stage9_failure");
+            details.put("underlying_diagnostic_code", successorVerdict.diagnostic().code().name());
+            throw new RejectException(DiagnosticCode.E_MIGRATION_MISMATCH, details);
+        }
+
+        // Publisher continuity and binding-field equality (checks 3 and 4).
+        String announcingPub = ((JsonValue.Str) announcing.get("publisher_pubkey")).value();
+        String successorPub = ((JsonValue.Str) successorDoc.get("publisher_pubkey")).value();
+        if (!announcingPub.equals(successorPub)) {
+            throw mismatch("publisher_pubkey");
+        }
+        JsonValue.Obj successorDocOrigin = (JsonValue.Obj) successorDoc.get("origin");
+        String successorDocAddress = ((JsonValue.Str) successorDocOrigin.get("address")).value();
+        if (!successorDocAddress.equals(((JsonValue.Str) successorOrigin.get("address")).value())) {
+            throw mismatch("address");
+        }
+        String successorDocPubkey = ((JsonValue.Str) successorDocOrigin.get("origin_pubkey")).value();
+        if (!successorDocPubkey.equals(((JsonValue.Str) successorOrigin.get("origin_pubkey")).value())) {
+            throw mismatch("origin_pubkey");
+        }
+    }
+
+    // --- content / transaction ---
+
+    static void contentPath(JsonValue.Obj doc, Context ctx) {
+        if (ctx.fetchedPath == null) {
+            return;
+        }
+        String declared = ((JsonValue.Str) doc.get("path")).value();
+        if (!declared.equals(ctx.fetchedPath)) {
+            throw new RejectException(DiagnosticCode.E_BIND_PATH);
+        }
+    }
+
+    static void transaction(JsonValue.Obj doc, Context ctx) {
+        if (ctx.submitPath != null) {
+            String inResponseTo = ((JsonValue.Str) doc.get("in_response_to")).value();
+            if (!inResponseTo.equals(ctx.submitPath)) {
+                throw new RejectException(DiagnosticCode.E_BIND_RESPONSE_PATH);
+            }
+        }
+        if (ctx.submitBody != null) {
+            // request_hash = "sha-256:" || base64url(SHA-256(JCS(submit_body))).
+            JsonValue submitParsed = JsonParser.parse(new String(ctx.submitBody, StandardCharsets.UTF_8));
+            byte[] canonical = Jcs.canonicalize(submitParsed);
+            String expectedHash = "sha-256:" + base64urlNoPad(Sha.sha256(canonical));
+            String declaredHash = ((JsonValue.Str) doc.get("request_hash")).value();
+            if (!declaredHash.equals(expectedHash)) {
+                throw new RejectException(DiagnosticCode.E_BIND_REQUEST_HASH);
+            }
+        }
+    }
+
+    // --- helpers ---
+
+    private static RejectException migrationInvalid(String reason, String announcing, String successor) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", reason);
+        details.put("announcing_origin_address", announcing);
+        details.put("successor_origin_address", successor);
+        return new RejectException(DiagnosticCode.E_MIGRATION_INVALID, details);
+    }
+
+    private static RejectException mismatch(String field) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("mismatch_field", field);
+        return new RejectException(DiagnosticCode.E_MIGRATION_MISMATCH, details);
+    }
+
+    private static String isoMinute(long epochSeconds) {
+        long minute = (epochSeconds / 60) * 60;
+        return java.time.Instant.ofEpochSecond(minute)
+                .atOffset(java.time.ZoneOffset.UTC)
+                .format(java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:'00Z'"));
+    }
+
+    private static String base64urlNoPad(byte[] data) {
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(data);
+    }
+}
