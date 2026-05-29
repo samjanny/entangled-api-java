@@ -165,6 +165,32 @@ public final class Inline {
             throw Fields.syntax();
         }
         noControlOrSpace(url);
+        // section 03:584: the URL host MUST be a valid carrier address for the
+        // declared carrier; for tor-v3, a 56-char onion address plus ".onion".
+        validateOnionAddress(authorityHost(url.substring("http://".length())));
+    }
+
+    /**
+     * Extract the host from the authority of a URL slice that follows the
+     * scheme prefix: stop at the first {@code /}, {@code ?}, or {@code #};
+     * strip optional userinfo before {@code @}; strip an optional {@code :port}
+     * suffix. Returns "" when no host is present, which
+     * {@link #validateOnionAddress} then rejects.
+     */
+    private static String authorityHost(String afterScheme) {
+        int end = afterScheme.length();
+        for (int i = 0; i < afterScheme.length(); i++) {
+            char c = afterScheme.charAt(i);
+            if (c == '/' || c == '?' || c == '#') {
+                end = i;
+                break;
+            }
+        }
+        String authority = afterScheme.substring(0, end);
+        int at = authority.lastIndexOf('@');
+        String hostPort = (at >= 0) ? authority.substring(at + 1) : authority;
+        int colon = hostPort.lastIndexOf(':');
+        return (colon >= 0) ? hostPort.substring(0, colon) : hostPort;
     }
 
     private static void validateCitationUrl(String url) {
