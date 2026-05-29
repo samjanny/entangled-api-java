@@ -58,8 +58,10 @@ class JcsTest {
     @Test
     void nonAsciiEmittedRaw() {
         // A precomposed e-acute (U+00E9) is emitted as its raw UTF-8 bytes
-        // (0xC3 0xA9), not escaped. The Java source stays ASCII by writing the
-        // character with a \\u00e9 escape (a Java char literal, not a JSON escape).
+        // (0xC3 0xA9), not as a \\uXXXX escape. This matters for signatures over
+        // documents with non-ASCII text (for example canary.statement), which
+        // the ASCII-only section 04 vector does not exercise. The U+00E9 is
+        // written as a \\u00e9 Java char literal for an unambiguous expectation.
         String input = "{\"k\":\"caf\u00e9\"}";
         JsonValue parsed = JsonParser.parse(input);
         byte[] canonical = Jcs.canonicalize(parsed);
