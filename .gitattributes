@@ -1,0 +1,12 @@
+# Keep the conformance corpus byte-for-byte reproducible across platforms.
+# The corpus is hash-bound and signature-verified against exact bytes, so its
+# line endings must stay LF regardless of the checkout platform.
+src/test/resources/corpus/**/*.json text eol=lf
+src/test/resources/corpus/**/*.md text eol=lf
+src/test/resources/corpus/**/*.py text eol=lf
+src/test/resources/corpus/tools/bip39_english.txt text eol=lf
+
+# Source files: stable LF throughout the repo.
+*.java text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
