@@ -9,18 +9,64 @@
 An independent Java reference implementation of the **Entangled v1.0** protocol,
 built solely from the specification at
 [`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.27`
-(its `specs/`, `docs/`, and `corpus/`).
+(its `specs/`, `docs/`, and `corpus/`), without reference to any other
+implementation.
 
-## Why this exists
+## Usage
 
-This is a *second, isolated reading* of the Entangled specification. The existing
-Rust implementation shares an author with the spec, so its conformance does not,
-by itself, show that the spec reads unambiguously. This implementation was
-written from scratch **without reference to any other implementation** of the
-protocol -- only the specification text and the conformance corpus. The
-isolation is from the other implementation, not from its author. Where the two
-implementations diverge, that divergence is a signal about the spec, which is the
-point of the exercise.
+The library validates a fetched Entangled document end to end (sections 02-11)
+and returns a normative outcome. You give it the raw response bytes plus the
+fetch context a client already holds, and get back an accept or a reject carrying
+the section 11 diagnostic code and its structured details.
+
+```java
+import org.entangled.Verdict;
+import org.entangled.pipeline.Context;
+import org.entangled.pipeline.Pipeline;
+import org.entangled.pipeline.Stage4Kind;
+
+// Verify a manifest fetched from /manifest.json over a Tor v3 onion origin.
+Context ctx = new Context(nowEpochSeconds);          // your trusted current time
+ctx.expectedKind = Stage4Kind.Kind.MANIFEST;         // known from the fetch endpoint
+ctx.fetchedOriginAddress = "<56-char-onion>.onion";  // the address you connected to
+
+Verdict verdict = new Pipeline(ctx).run(manifestBytes);
+
+if (verdict.isAccepted()) {
+    // The manifest is valid, current, and origin-bound: render under it.
+} else {
+    DiagnosticCode code = verdict.diagnostic().code();      // e.g. E_BIND_ORIGIN
+    Map<String, Object> details = verdict.diagnostic().details();
+}
+```
+
+A content document is verified against the runtime key the current manifest
+authorizes, and against the path it was fetched from:
+
+```java
+Context ctx = new Context(nowEpochSeconds);
+ctx.expectedKind = Stage4Kind.Kind.CONTENT;
+ctx.fetchedPath = "/articles/first-post";            // byte-exact path binding
+ctx.expectedRuntimePubkey = "<base64url runtime key>";
+
+Verdict verdict = new Pipeline(ctx).run(contentBytes);
+```
+
+`Context` carries the rest of what a real client holds when it matters: the
+submit path and body for transaction binding (`submitPath`, `submitBody`), prior
+verified manifests for anti-downgrade and canary checks (`publisherHistory`), and
+the successor manifest for migration scenarios (`successorManifest`). Fields left
+unset simply skip the checks that depend on them.
+
+Outcomes are exhaustive and machine-readable: `Verdict.isAccepted()`, and on a
+rejection `verdict.diagnostic().code()` (a `DiagnosticCode` enum value carrying
+its severity and pipeline stage) plus `verdict.diagnostic().details()`.
+
+There are no runtime dependencies; add the built jar to your classpath. Requires
+Java 21 at runtime.
+
+See `src/test/java/org/entangled/UsageExampleTest.java` for these snippets as
+runnable tests.
 
 ## Status
 
