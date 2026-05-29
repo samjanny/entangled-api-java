@@ -1,0 +1,26 @@
+{
+  "_comment": "Test fixtures only. NEVER use these for any real deployment.",
+  "publisher": {
+    "seed_hex": "454e54414e474c45442d76312e302d7075626c69736865722d74657374303100",
+    "pub_b64u": "moyzpl3i5hUIcMNRLPMxir4sdmSO3gO79gLUtvYDWxc",
+    "pip": "once grain trumpet rookie common appear canyon blur eye guide small betray tissue depth mutual swift admit text level practice hunt accuse hobby unusual"
+  },
+  "runtime": {
+    "seed_hex": "454e54414e474c45442d76312e302d72756e74696d652d746573743030303100",
+    "pub_b64u": "jzFtziEJkbIdjI15I4u3ni3bBa6IFElyyjEmMVSGF7o"
+  },
+  "origin": {
+    "seed_hex": "454e54414e474c45442d76312e302d6f726967696e2d74657374303030303100",
+    "pub_b64u": "Gp8y4JM7Qlkn8JXkJAOW8s3MSkkQNGHGC1c7-AK6Wpo",
+    "tor_v3_address": "dkptfyethnbfsj7qsxscia4w6lg4yssjca2gdrqlk457qav2lkna4xqd.onion"
+  },
+  "runtime_2": {
+    "seed_hex": "454e54414e474c45442d76312e302d72756e74696d652d746573743030303200",
+    "pub_b64u": "rN5KJ_PD7wcccfXJTgJVZIRG5bd8O-ZYhgdImGhD980"
+  },
+  "origin_2": {
+    "seed_hex": "454e54414e474c45442d76312e302d6f726967696e2d74657374303030303200",
+    "pub_b64u": "Ko4-lXCoSgOUc_2Dt2Bi9NcyVyUN3GYgEKMJkgPQtb8",
+    "tor_v3_address": "fkhd5flqvbfahfdt7wb3oydc6tltevzfbxogmiaqumezea6qww7rjhid.onion"
+  }
+}
