@@ -6,11 +6,10 @@
 [![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
-An independent Java reference implementation of the **Entangled v1.0** protocol,
-built solely from the specification at
+A Java reference implementation of the **Entangled v1.0** protocol,
+built from the specification at
 [`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.27`
-(its `specs/`, `docs/`, and `corpus/`), without reference to any other
-implementation.
+(its `specs/`, `docs/`, and `corpus/`).
 
 ## Usage
 
