@@ -161,6 +161,8 @@ public final class Blocks {
         String submitLabel = Fields.str(b.get("submit_label"));
         Fields.maxBytes(submitLabel, 100);
         Fields.noControlChars(submitLabel, false);
+        // section 04:159: submit_form form-level labels are user-visible; NFC required.
+        Fields.requireNfc(submitLabel);
     }
 
     private static String formField(JsonValue.Obj f) {
@@ -196,6 +198,8 @@ public final class Blocks {
         String label = Fields.str(f.get("label"));
         Fields.maxBytes(label, 200);
         Fields.noControlChars(label, false);
+        // section 04:159: submit_form field labels are user-visible; NFC required.
+        Fields.requireNfc(label);
         Fields.bool(f.get("required"));
         return name;
     }
@@ -217,6 +221,8 @@ public final class Blocks {
             String label = Fields.str(opt.get("label"));
             Fields.maxBytes(label, 200);
             Fields.noControlChars(label, false);
+            // section 04:159: submit_form option labels are user-visible; NFC required.
+            Fields.requireNfc(label);
         }
     }
 
