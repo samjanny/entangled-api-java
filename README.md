@@ -116,31 +116,6 @@ CI (`.github/workflows/ci.yml`) runs both on every push.
   content path, or a submit response), since the kind-specific cap is enforced
   before parsing.
 
-## Ambiguities found
-
-Per the spec's ambiguity protocol, genuine ambiguities encountered at the Java
-boundary -- points where two conforming implementations could diverge with no
-clear non-conformance, and which no corpus vector constrains -- were filed as
-issues against `samjanny/entangled`:
-
-- **AMB-10** (issue #11): the diagnostic for a bad `origin.carrier` value
-  (e.g. `"i2p"`) is not pinned -- `E_SCHEMA_FIELD_SYNTAX` vs
-  `E_SCHEMA_ENUM_VIOLATION`. This implementation chose `E_SCHEMA_ENUM_VIOLATION`.
-- **AMB-11** (issue #12): the stage/code for an uppercase or otherwise
-  non-canonical `origin.address` is not pinned -- Stage 5
-  `E_SCHEMA_FIELD_SYNTAX` vs Stage 9 `E_BIND_ORIGIN`. This implementation chose
-  Stage 5 `E_SCHEMA_FIELD_SYNTAX`.
-- **AMB-12** (issue #13): whether an Expired canary halts the pipeline at
-  Stage 8 (reporting `E_CANARY_EXPIRED`) or is a Stage 10 render-block that lets
-  a co-occurring Stage 9 `E_ORIGIN_EXPIRED` win was not pinned. Resolved in
-  rc.29 as the latter (render-block); this implementation already followed that
-  reading -- Stage 8 halts only on the four canary *rejection* codes and never
-  emits `E_CANARY_EXPIRED` as a pipeline reject.
-
-Each chosen reading is documented in a code comment citing the spec passages
-that motivated it. AMB-10, AMB-11, and AMB-12 are all now resolved upstream
-(rc.28-rc.29) in line with this implementation.
-
 ## Layout
 
 ```
