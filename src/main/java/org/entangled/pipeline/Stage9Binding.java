@@ -151,15 +151,25 @@ public final class Stage9Binding {
         // Run the successor manifest through the full pipeline in isolation.
         Context successorCtx = new Context(ctx.nowEpoch);
         successorCtx.fetchedOriginAddress = successorAddress;
+        // The successor manifest is attacker-controlled (fetched from the
+        // announced successor onion address). It is parsed here for the cycle
+        // pre-check; invalid JSON throws E_PARSE_* (a clean reject), but a
+        // valid-JSON value that is not the manifest shape this code expects must
+        // not crash with an unchecked cast. A non-object body, or a body whose
+        // migration_pointer / successor_origin / fields are the wrong type, is
+        // left for the successor's own pipeline run below to reject as
+        // E_MIGRATION_MISMATCH; only a well-formed successor reaches the typed
+        // comparisons.
+        JsonValue parsedSuccessor = JsonParser.parse(new String(ctx.successorManifest, StandardCharsets.UTF_8));
+        JsonValue.Obj successorDoc = parsedSuccessor instanceof JsonValue.Obj obj ? obj : null;
+
         // The successor may itself announce a migration; detect a cycle back to
         // the announcing origin before recursing into its own migration step.
-        JsonValue.Obj successorDoc =
-                (JsonValue.Obj) JsonParser.parse(new String(ctx.successorManifest, StandardCharsets.UTF_8));
-        if (successorDoc.has("migration_pointer")) {
-            JsonValue.Obj sMp = (JsonValue.Obj) successorDoc.get("migration_pointer");
-            JsonValue.Obj sSucc = (JsonValue.Obj) sMp.get("successor_origin");
-            String sSuccAddr = ((JsonValue.Str) sSucc.get("address")).value();
-            if (sSuccAddr.equals(announcingAddress)) {
+        // The peek is type-guarded: a malformed migration_pointer simply does not
+        // trigger the cycle reason and falls through to the pipeline run.
+        if (successorDoc != null) {
+            String sSuccAddr = nestedString(successorDoc, "migration_pointer", "successor_origin", "address");
+            if (sSuccAddr != null && sSuccAddr.equals(announcingAddress)) {
                 // A -> B -> A: the successor announces a return to the announcing origin.
                 throw migrationInvalid("chain_cycle", successorAddress, announcingAddress);
             }
@@ -175,6 +185,15 @@ public final class Stage9Binding {
             throw new RejectException(DiagnosticCode.E_MIGRATION_MISMATCH, details);
         }
 
+        // The successor passed its own pipeline, so it is a schema-valid manifest
+        // object with a well-typed origin, publisher_pubkey, address, and
+        // origin_pubkey; the accessors below are therefore safe. (A non-object
+        // body would have been rejected at the successor's Stage 4, so
+        // successorDoc is non-null here; assert it defensively rather than rely
+        // on the invariant implicitly.)
+        if (successorDoc == null) {
+            throw mismatch("successor_shape");
+        }
         // Publisher continuity and binding-field equality (checks 3 and 4).
         String announcingPub = ((JsonValue.Str) announcing.get("publisher_pubkey")).value();
         String successorPub = ((JsonValue.Str) successorDoc.get("publisher_pubkey")).value();
@@ -190,6 +209,22 @@ public final class Stage9Binding {
         if (!successorDocPubkey.equals(((JsonValue.Str) successorOrigin.get("origin_pubkey")).value())) {
             throw mismatch("origin_pubkey");
         }
+    }
+
+    /**
+     * Walk a chain of object members and return the final value as a string, or
+     * {@code null} if any step is absent or not of the expected type. Used to
+     * read attacker-controlled successor-manifest fields without unchecked casts.
+     */
+    private static String nestedString(JsonValue.Obj root, String... path) {
+        JsonValue current = root;
+        for (int i = 0; i < path.length; i++) {
+            if (!(current instanceof JsonValue.Obj obj)) {
+                return null;
+            }
+            current = obj.get(path[i]);
+        }
+        return current instanceof JsonValue.Str s ? s.value() : null;
     }
 
     // --- content / transaction ---

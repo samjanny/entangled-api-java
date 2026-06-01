@@ -1,5 +1,6 @@
 package org.entangled;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,6 +11,8 @@ import org.entangled.pipeline.Pipeline;
 import org.entangled.pipeline.Stage4Kind;
 import org.entangled.schema.Rfc3339;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Focused Stage 9 transaction-binding tests (section 10), complementing the
@@ -80,5 +83,52 @@ class Stage9BindingTest {
         Verdict verdict = new Pipeline(ctx).run(tx);
         assertTrue(verdict.isAccepted(),
                 "valid transaction with matching request_id must be accepted: " + verdict);
+    }
+
+    // Migration clock: corpus global clock_now, under which vector 200's
+    // announcing manifest passes its own Stages 6/8/9 and reaches the successor
+    // verification step.
+    private static final long MIGRATION_NOW = Rfc3339.epochSeconds("2026-05-07T00:01:00Z");
+    private static final String ANNOUNCING_ADDRESS =
+            "dkptfyethnbfsj7qsxscia4w6lg4yssjca2gdrqlk457qav2lkna4xqd.onion";
+
+    /**
+     * A successor manifest is fetched from the attacker-controlled announced
+     * successor origin, so its bytes are untrusted. A successor that is valid
+     * JSON but not the manifest shape the migration check expects (a non-object
+     * body, or an object whose migration_pointer / successor_origin / fields are
+     * the wrong type) must be rejected with a clean verdict, not crash the
+     * pipeline with an unchecked ClassCastException / NullPointerException that
+     * escapes the {@code catch (RejectException)} in {@code Pipeline.run}.
+     *
+     * <p>Each payload below is a well-formed JSON value that previously triggered
+     * an unguarded cast in {@code verifySuccessor}. The expected outcome is a
+     * reject as {@code E_MIGRATION_MISMATCH}: the malformed successor fails its
+     * own pipeline (Stage 4 kind / Stage 5 schema), surfaced as
+     * {@code successor_stage9_failure}.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "[1,2,3]",
+        "\"just a string\"",
+        "123",
+        "{}",
+        "{\"migration_pointer\":{}}",
+        "{\"migration_pointer\":{\"successor_origin\":{}}}",
+        "{\"migration_pointer\":{\"successor_origin\":{\"address\":5}}}",
+    })
+    void malformedSuccessorManifestRejectedNotCrashed(String successorJson) {
+        byte[] announcing = CorpusFiles.vectorInput("200-migration-successor-origin-expired");
+        Context ctx = new Context(MIGRATION_NOW);
+        ctx.expectedKind = Stage4Kind.Kind.MANIFEST;
+        ctx.fetchedOriginAddress = ANNOUNCING_ADDRESS;
+        ctx.successorOriginAddress = "fkhd5flqvbfahfdt7wb3oydc6tltevzfbxogmiaqumezea6qww7rjhid.onion";
+        ctx.successorManifest = successorJson.getBytes(StandardCharsets.UTF_8);
+
+        Verdict verdict = assertDoesNotThrow(() -> new Pipeline(ctx).run(announcing),
+                "a malformed successor manifest must not throw out of the pipeline");
+        assertFalse(verdict.isAccepted(), "a malformed successor manifest must be rejected");
+        assertEquals(DiagnosticCode.E_MIGRATION_MISMATCH, verdict.diagnostic().code(),
+                "a structurally invalid successor fails its own pipeline -> E_MIGRATION_MISMATCH");
     }
 }
