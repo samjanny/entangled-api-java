@@ -90,7 +90,9 @@ public final class DocumentSchema {
 
         Fields.base64url(Fields.str(doc.get("publisher_pubkey")), 32);
 
-        long issuedAt = validateCanary(Fields.obj(doc.get("canary")));
+        // issuedAt is null when canary.issued_at is not a valid timestamp; the
+        // origin not_after cross-field check then defers (Stage 8 reports it).
+        Long issuedAt = validateCanary(Fields.obj(doc.get("canary")));
         validateOrigin(Fields.obj(doc.get("origin")), issuedAt);
         validateStatePolicy(Fields.arr(doc.get("state_policy")));
         validateNavigation(Fields.arr(doc.get("navigation")));
@@ -98,7 +100,7 @@ public final class DocumentSchema {
         validateUpdated(Fields.str(doc.get("updated")), nowEpoch);
 
         if (doc.has("migration_pointer")) {
-            validateMigrationPointer(Fields.obj(doc.get("migration_pointer")), doc, issuedAt);
+            validateMigrationPointer(Fields.obj(doc.get("migration_pointer")), doc);
         }
         if (doc.has("content_root")) {
             sha256Field(Fields.str(doc.get("content_root")));
@@ -141,27 +143,35 @@ public final class DocumentSchema {
 
     // --- manifest sub-objects ---
 
-    /** Validate the canary object; returns canary.issued_at in epoch seconds. */
-    private static long validateCanary(JsonValue.Obj canary) {
+    /**
+     * Validate the canary object at Stage 5 (schema): closed-schema membership,
+     * {@code runtime_pubkey} base64url/length, and the {@code statement} /
+     * {@code freshness_proof} string-content rules (length, control characters,
+     * NFC -> E_SCHEMA_FIELD_SYNTAX, section 08:104, 08:118).
+     *
+     * <p>The canary timestamp validity, ordering, and 7..30 day interval bounds
+     * are NOT checked here: per AMB-16 (section 11:209) a malformed canary
+     * timestamp or an out-of-bounds interval is a Stage 8 canary-integrity
+     * failure reported as E_CANARY_INVALID, after the Stage 6 signature check,
+     * not a Stage 5 schema code. Stage 5 enforces only that {@code issued_at} and
+     * {@code next_expected} are present and are strings (their JSON type); the
+     * timestamp-as-instant judgment is deferred to {@link Stage8Canary}.
+     *
+     * <p>Returns {@code canary.issued_at} in epoch seconds when it is a valid
+     * timestamp, or {@code null} when it is not. A {@code null} return tells the
+     * Stage 5 cross-field checks that depend on {@code issued_at} (origin
+     * not_after) to defer; Stage 8 then reports the malformed timestamp.
+     */
+    private static Long validateCanary(JsonValue.Obj canary) {
         Closed.check(canary,
                 Set.of("runtime_pubkey", "issued_at", "next_expected", "statement", "freshness_proof"),
                 Set.of("runtime_pubkey", "issued_at", "next_expected", "statement"));
         Fields.base64url(Fields.str(canary.get("runtime_pubkey")), 32);
 
+        // Type/presence only: issued_at and next_expected must be strings. Their
+        // timestamp validity and interval are a Stage 8 concern (AMB-16).
         String issuedAtStr = Fields.str(canary.get("issued_at"));
-        String nextExpectedStr = Fields.str(canary.get("next_expected"));
-        // Timestamp syntax is a canary-structural concern; an invalid timestamp
-        // is reported as E_CANARY_INVALID at Stage 8, not E_SCHEMA_FIELD_SYNTAX.
-        if (!Rfc3339.isValid(issuedAtStr) || !Rfc3339.isValid(nextExpectedStr)) {
-            throw new RejectException(DiagnosticCode.E_CANARY_INVALID);
-        }
-        long issuedAt = Rfc3339.epochSeconds(issuedAtStr);
-        long nextExpected = Rfc3339.epochSeconds(nextExpectedStr);
-        // next_expected strictly later than issued_at; interval 7..30 days.
-        long interval = nextExpected - issuedAt;
-        if (interval < 604800 || interval > 2592000) {
-            throw new RejectException(DiagnosticCode.E_CANARY_INVALID);
-        }
+        Fields.str(canary.get("next_expected"));
 
         String statement = Fields.str(canary.get("statement"));
         Fields.maxBytes(statement, 2048);
@@ -174,10 +184,13 @@ public final class DocumentSchema {
             Fields.noControlChars(fp, false);
             Fields.requireNfc(fp);
         }
-        return issuedAt;
+
+        // Provide issued_at to the Stage 5 cross-field checks only when it is a
+        // real instant; otherwise defer (Stage 8 reports the bad timestamp).
+        return Rfc3339.isValid(issuedAtStr) ? Rfc3339.epochSeconds(issuedAtStr) : null;
     }
 
-    private static void validateOrigin(JsonValue.Obj origin, long issuedAt) {
+    private static void validateOrigin(JsonValue.Obj origin, Long issuedAt) {
         Closed.check(origin,
                 Set.of("carrier", "address", "origin_pubkey", "not_after"),
                 Set.of("carrier", "address", "origin_pubkey"));
@@ -190,13 +203,20 @@ public final class DocumentSchema {
         if (origin.has("not_after")) {
             String notAfterStr = Fields.str(origin.get("not_after"));
             Fields.rfc3339(notAfterStr);
-            long notAfter = Rfc3339.epochSeconds(notAfterStr);
-            // Cross-field semantic checks (E_ORIGIN_INVALID, section 06).
-            if (notAfter <= issuedAt) {
-                throw originInvalid("not_after_not_later_than_issued_at");
-            }
-            if (notAfter - issuedAt > NOT_AFTER_MAX_HORIZON_SECONDS) {
-                throw originInvalid("not_after_beyond_5y");
+            // AMB-16: the not_after vs issued_at cross-field check needs a valid
+            // canary.issued_at. When issued_at is not a valid timestamp
+            // (issuedAt == null), defer this check; Stage 8 reports the malformed
+            // canary timestamp as E_CANARY_INVALID, so it is not a Stage 5 origin
+            // error.
+            if (issuedAt != null) {
+                long notAfter = Rfc3339.epochSeconds(notAfterStr);
+                // Cross-field semantic checks (E_ORIGIN_INVALID, section 06).
+                if (notAfter <= issuedAt) {
+                    throw originInvalid("not_after_not_later_than_issued_at");
+                }
+                if (notAfter - issuedAt > NOT_AFTER_MAX_HORIZON_SECONDS) {
+                    throw originInvalid("not_after_beyond_5y");
+                }
             }
         }
     }
@@ -280,7 +300,7 @@ public final class DocumentSchema {
         }
     }
 
-    private static void validateMigrationPointer(JsonValue.Obj mp, JsonValue.Obj manifest, long issuedAt) {
+    private static void validateMigrationPointer(JsonValue.Obj mp, JsonValue.Obj manifest) {
         Closed.check(mp, Set.of("successor_origin", "announced_at"),
                 Set.of("successor_origin", "announced_at"));
         JsonValue.Obj successor = Fields.obj(mp.get("successor_origin"));

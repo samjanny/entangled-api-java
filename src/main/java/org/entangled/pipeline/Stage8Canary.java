@@ -14,8 +14,13 @@ import org.entangled.schema.Rfc3339;
 /**
  * Stage 8: canary and anti-downgrade resolution (section 08, section 10).
  *
- * <p>Structural canary validity (field shapes, interval 7..30 days) is enforced
- * at Stage 5; this stage adds the time- and history-dependent checks:
+ * <p>Stage 5 enforces only the canary field shapes (closed schema,
+ * {@code runtime_pubkey}, and the {@code statement} / {@code freshness_proof}
+ * string-content rules). The canary timestamp validity, {@code next_expected}
+ * ordering, and 7..30 day interval bounds are checked here at Stage 8 (AMB-16,
+ * section 11:209): a malformed canary timestamp or out-of-bounds interval is
+ * E_CANARY_INVALID reported after Stage 6, not a Stage 5 schema code. This stage
+ * then adds the time- and history-dependent checks:
  * <ul>
  *   <li>{@code issued_at} future-skew beyond the 300s tolerance ->
  *       {@code E_CANARY_INVALID} (section 08, vector 183);</li>
@@ -44,7 +49,24 @@ public final class Stage8Canary {
     static void evaluate(JsonValue.Obj doc, Context ctx) {
         JsonValue.Obj canary = (JsonValue.Obj) doc.get("canary");
         String issuedAtStr = ((JsonValue.Str) canary.get("issued_at")).value();
+        String nextExpectedStr = ((JsonValue.Str) canary.get("next_expected")).value();
+
+        // Canary timestamp validity, ordering, and interval bounds are Stage 8
+        // canary-integrity checks (AMB-16, section 11:209): a malformed
+        // issued_at / next_expected timestamp, next_expected not strictly after
+        // issued_at, or an interval outside [7, 30] days is E_CANARY_INVALID,
+        // reported here after the Stage 6 signature check, not as a Stage 5
+        // schema code. Stage 5 validated only that the two fields are strings, so
+        // the timestamp-as-instant judgment happens here, before epochSeconds.
+        if (!Rfc3339.isValid(issuedAtStr) || !Rfc3339.isValid(nextExpectedStr)) {
+            throw new RejectException(DiagnosticCode.E_CANARY_INVALID);
+        }
         long issuedAt = Rfc3339.epochSeconds(issuedAtStr);
+        long nextExpected = Rfc3339.epochSeconds(nextExpectedStr);
+        long interval = nextExpected - issuedAt;
+        if (interval < CANARY_INTERVAL_MIN_SECS || interval > CANARY_INTERVAL_MAX_SECS) {
+            throw new RejectException(DiagnosticCode.E_CANARY_INVALID);
+        }
 
         // issued_at future-skew beyond the 300s tolerance is a canary Invalid
         // condition (section 08), distinct from the section 05 signature checks.
@@ -140,4 +162,8 @@ public final class Stage8Canary {
     // Section 10 clock-skew tolerance, mirrored here to avoid a cross-package
     // constant dependency cycle; both reference the same normative 300 seconds.
     private static final long DocumentSchema_SKEW = 300;
+
+    // Canary interval bounds (section 08:86): [7, 30] days, in seconds.
+    private static final long CANARY_INTERVAL_MIN_SECS = 604800;   // 7 days
+    private static final long CANARY_INTERVAL_MAX_SECS = 2592000;  // 30 days
 }

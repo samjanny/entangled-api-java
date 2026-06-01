@@ -109,4 +109,15 @@ class SchemaStageTest {
         assertDoesNotThrow(() -> runStage5("006-manifest-valid-not-after", Stage2Input.MANIFEST_BYTE_CAP));
         assertDoesNotThrow(() -> runStage5("007-content-valid-large-seq", Stage2Input.CONTENT_BYTE_CAP));
     }
+
+    @Test
+    void malformedCanaryTimestampPassesStage5() {
+        // AMB-16 (section 11:209): a malformed canary timestamp is a Stage 8
+        // canary-integrity failure (E_CANARY_INVALID), not a Stage 5 schema code.
+        // Vector 186 carries a malformed canary.next_expected ("garbage"); Stage 5
+        // checks only that the canary timestamp fields are strings, so it must
+        // pass Stage 5 here. The full pipeline still rejects it at Stage 8 (the
+        // conformance suite pins the E_CANARY_INVALID verdict).
+        assertDoesNotThrow(() -> runStage5("186-canary-malformed-timestamp", Stage2Input.MANIFEST_BYTE_CAP));
+    }
 }
