@@ -13,8 +13,8 @@ import java.util.Arrays;
  * <p><b>Do not ship your own crypto.</b> The curve arithmetic, the SHA-512 hash,
  * and the RFC 8032 verification equation are delegated to the JDK's built-in
  * Ed25519 implementation (the {@code SunEC} provider, JEP 339, JDK 15+). This
- * class is only a thin, documented layer that adds the one strict-profile
- * rejection the JDK does not perform, exactly as section 05:180 directs: "Where
+ * class is only a thin, documented layer that adds the strict-profile
+ * rejections the JDK does not perform, exactly as section 05:180 directs: "Where
  * a library does not expose a strict mode separately, the implementation MUST
  * add the rejections defined above on top of the library's default verification
  * path."
@@ -35,20 +35,29 @@ import java.util.Arrays;
  * </ul>
  *
  * <p><b>What the JDK already enforces.</b> {@code SunEC}'s Ed25519 verify rejects
- * a non-canonical scalar {@code S} ({@code S >= L}) and non-canonical point
- * encodings of {@code A} and {@code R} ({@code y >= p}), and -- critically for
+ * a non-canonical scalar {@code S} ({@code S >= L}), and -- critically for
  * section 05:178 -- it evaluates the <em>cofactorless</em> equation, so it
  * rejects mixed-order (torsion-laden) points that a cofactored verifier would
  * accept. Those checks are not re-implemented here.
  *
- * <p><b>What the JDK does not do, and this layer adds: explicit small-order
- * rejection of {@code A} and {@code R}</b> (section 05:174). {@code SunEC} does
- * not reject small-order points, so a small-order {@code A} or {@code R} is
- * caught here, before delegating, to match the {@code verify_strict} mode in
- * {@code ed25519-dalek} that section 05 names as the reference (it rejects when
- * {@code signature_R.is_small_order()} or {@code A.is_small_order()}). The check
- * is a constant-table comparison against the eight known small-order point
- * encodings on edwards25519 -- it performs no curve arithmetic of its own.
+ * <p><b>What the JDK does not do, and this layer adds.</b> Two strict-profile
+ * rejections of {@code A} and {@code R} are performed here, before delegating:
+ * <ul>
+ *   <li><b>non-canonical point encodings</b> ({@code y >= p}, sign bit masked
+ *       off) (section 05:154, 05:168). {@code SunEC} does NOT reject these: it
+ *       reduces {@code y} modulo {@code p} (ZIP-215 style) and verifies against
+ *       the reduced point, so a non-canonical encoding of the genuine key,
+ *       presented with a signature valid under the reduced point, would
+ *       otherwise be accepted. The check compares the little-endian {@code y}
+ *       against {@code p = 2^255 - 19}.</li>
+ *   <li><b>small-order points</b> (order dividing the cofactor 8) (section
+ *       05:155, 05:174). {@code SunEC} does not reject these either. The check
+ *       is a constant-table comparison against the eight known small-order point
+ *       encodings on edwards25519 -- it performs no curve arithmetic of its own.</li>
+ * </ul>
+ * Both match the {@code verify_strict} mode in {@code ed25519-dalek} that section
+ * 05 names as the reference (it rejects when {@code signature_R.is_small_order()}
+ * or {@code A.is_small_order()} and rejects non-canonical compressed points).
  *
  * <p><b>Conformance is measured, not assumed.</b> Run against the 15
  * {@code ed25519-speccheck} vectors (Chalkias-Garillot-Nikolaenko, "Taming the
@@ -103,14 +112,29 @@ public final class Ed25519 {
         if (publicKey.length != 32 || signature.length != 64) {
             return false;
         }
-        // Strict-profile addition (section 05:174): reject a small-order public
-        // key A or signature component R before the equation is evaluated. R is
-        // the first 32 bytes of the signature. The JDK does not do this.
-        if (isSmallOrder(publicKey) || isSmallOrder(Arrays.copyOfRange(signature, 0, 32))) {
+        byte[] r = Arrays.copyOfRange(signature, 0, 32);
+        // Strict-profile additions the JDK does not perform, applied before the
+        // equation is evaluated. R is the first 32 bytes of the signature.
+        //
+        //   1. Reject a non-canonical encoding of A or R (section 05:154,
+        //      05:168): y >= p with the sign bit masked off. SunEC does NOT
+        //      reject these; it reduces y mod p (ZIP-215 style) and verifies
+        //      against the reduced point, so a non-canonical encoding of the
+        //      genuine key with a signature valid under the reduced point would
+        //      otherwise be accepted.
+        //   2. Reject a small-order A or R (section 05:155, 05:174): a point of
+        //      order dividing the cofactor 8.
+        //
+        // Both match the verify_strict mode in ed25519-dalek that section 05
+        // names as the reference.
+        if (!isCanonicalEncoding(publicKey) || !isCanonicalEncoding(r)) {
             return false;
         }
-        // Delegate the canonical-S check, canonical R/A decoding, SHA-512, and
-        // the cofactorless RFC 8032 verification equation to the JDK (SunEC).
+        if (isSmallOrder(publicKey) || isSmallOrder(r)) {
+            return false;
+        }
+        // Delegate the canonical-S check, SHA-512, and the cofactorless RFC 8032
+        // verification equation to the JDK (SunEC).
         try {
             PublicKey key = KeyFactory.getInstance("Ed25519")
                     .generatePublic(new X509EncodedKeySpec(x509Wrap(publicKey)));

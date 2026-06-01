@@ -168,6 +168,84 @@ class CryptoTest {
         }
     }
 
+    /**
+     * Section 05:154 / 05:168: a non-canonical compressed encoding of the public
+     * key {@code A} or the signature component {@code R} ({@code y >= p} once the
+     * sign bit is masked off) MUST be rejected. The JDK's {@code SunEC} provider
+     * does NOT reject these; it reduces {@code y} modulo {@code p} (ZIP-215 style)
+     * and verifies against the reduced point. {@code Ed25519.verify} therefore has
+     * to reject the non-canonical encoding itself, before delegating, or a
+     * non-canonical encoding of the genuine signing key, presented with a
+     * signature valid under the reduced point, would be wrongly accepted.
+     *
+     * <p>The test isolates the canonical-encoding guard from the other strict
+     * checks. It uses {@code y = p} ({@code ed..7f}) and {@code y = p + 1}
+     * ({@code ee..7f}) -- 32-byte encodings the field accepts but that lie at and
+     * just above the field prime. Around each non-canonical value it places the
+     * genuine, canonical, non-small-order counterpart from corpus vector 001 (a
+     * real signature when probing a non-canonical {@code A}, a real public key
+     * when probing a non-canonical {@code R}), so the small-order table and the
+     * {@code S < L} / equation checks cannot be what rejects -- only the new
+     * canonical-encoding guard can. SunEC's acceptance of the non-canonical key
+     * encodings is asserted first, so the test documents the exact gap the guard
+     * closes (and fails loudly if a future JDK changes that behaviour).
+     */
+    @Test
+    void rejectsNonCanonicalPublicKeyAndREncodings() {
+        byte[] yEqualsP = hex("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+        byte[] yEqualsPplus1 = hex("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+
+        // Precondition: SunEC accepts these non-canonical key encodings, so the
+        // section 05:154 rejection genuinely depends on this layer's own guard.
+        assertTrue(sunEcAcceptsPublicKey(yEqualsP),
+                "precondition: SunEC accepts y = p (this is the gap section 05:154 closes)");
+        assertTrue(sunEcAcceptsPublicKey(yEqualsPplus1),
+                "precondition: SunEC accepts y = p+1");
+
+        // The canonical-encoding check itself rejects them (regression guard on
+        // the logic: a canonical, non-small-order key passes, y >= p does not).
+        assertTrue(Ed25519.isStrictProfilePubkey(Base64Url.decode(PUBLISHER_PUB_B64U, 32)),
+                "genuine canonical non-small-order key must pass the strict profile");
+        assertFalse(Ed25519.isStrictProfilePubkey(yEqualsP), "y = p is non-canonical");
+        assertFalse(Ed25519.isStrictProfilePubkey(yEqualsPplus1), "y = p+1 is non-canonical");
+
+        // Genuine, canonical, non-small-order signature and key from vector 001.
+        byte[] body = CorpusFiles.vectorInput("001-manifest-valid-minimal");
+        JsonValue.Obj doc = (JsonValue.Obj) JsonParser.parse(new String(body, StandardCharsets.UTF_8));
+        byte[] genuineSig = Base64Url.decode(((JsonValue.Str) doc.get("sig")).value(), 64);
+        byte[] genuinePub = Base64Url.decode(((JsonValue.Str) doc.get("publisher_pubkey")).value(), 32);
+        byte[] msg = "entangled non-canonical encoding test".getBytes(StandardCharsets.UTF_8);
+
+        // Non-canonical A, with the genuine canonical R from vector 001: only the
+        // canonical(A) guard can reject. (Pre-fix, SunEC would reduce A mod p.)
+        assertFalse(Ed25519.verify(yEqualsP, genuineSig, msg), "non-canonical A (y = p) must be rejected");
+        assertFalse(Ed25519.verify(yEqualsPplus1, genuineSig, msg), "non-canonical A (y = p+1) must be rejected");
+
+        // Non-canonical R (first 32 bytes of the signature), with the genuine
+        // canonical S from vector 001 and a canonical A: only canonical(R) rejects.
+        byte[] sigNonCanonR = genuineSig.clone();
+        System.arraycopy(yEqualsP, 0, sigNonCanonR, 0, 32);
+        assertFalse(Ed25519.verify(genuinePub, sigNonCanonR, msg), "non-canonical R (y = p) must be rejected");
+        byte[] sigNonCanonR2 = genuineSig.clone();
+        System.arraycopy(yEqualsPplus1, 0, sigNonCanonR2, 0, 32);
+        assertFalse(Ed25519.verify(genuinePub, sigNonCanonR2, msg), "non-canonical R (y = p+1) must be rejected");
+    }
+
+    /** True iff SunEC's KeyFactory accepts the 32-byte raw encoding as an Ed25519 public key. */
+    private static boolean sunEcAcceptsPublicKey(byte[] rawKey) {
+        byte[] prefix = hex("302a300506032b6570032100");
+        byte[] x509 = new byte[prefix.length + rawKey.length];
+        System.arraycopy(prefix, 0, x509, 0, prefix.length);
+        System.arraycopy(rawKey, 0, x509, prefix.length, rawKey.length);
+        try {
+            java.security.KeyFactory.getInstance("Ed25519")
+                    .generatePublic(new java.security.spec.X509EncodedKeySpec(x509));
+            return true;
+        } catch (java.security.GeneralSecurityException e) {
+            return false;
+        }
+    }
+
     private static Vec v(boolean expected, String pub, String sig, String msg) {
         return new Vec(expected, pub, sig, msg);
     }
