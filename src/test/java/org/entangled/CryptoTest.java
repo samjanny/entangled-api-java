@@ -231,6 +231,60 @@ class CryptoTest {
         assertFalse(Ed25519.verify(genuinePub, sigNonCanonR2, msg), "non-canonical R (y = p+1) must be rejected");
     }
 
+    /**
+     * Section 05:169: the signature scalar {@code S}, little-endian, MUST satisfy
+     * {@code 0 <= S < L}, where {@code L} is the order of the Ed25519 base point.
+     * A non-canonical {@code S} ({@code S >= L}) MUST be rejected. The hardening
+     * makes this decision in-layer rather than delegating it to SunEC.
+     *
+     * <p>The test generates a genuine keypair and a valid signature (so the only
+     * defect introduced is the scalar), confirms it verifies, then replaces
+     * {@code S} with {@code S + L}: a different 32-byte encoding that is congruent
+     * mod {@code L} and would satisfy the verification equation, but is
+     * non-canonical. It must be rejected.
+     */
+    @Test
+    void rejectsNonCanonicalScalarS() throws Exception {
+        java.security.KeyPair kp =
+                java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        byte[] msg = "entangled canonical S test".getBytes(StandardCharsets.UTF_8);
+        java.security.Signature signer = java.security.Signature.getInstance("Ed25519");
+        signer.initSign(kp.getPrivate());
+        signer.update(msg);
+        byte[] sig = signer.sign();
+
+        byte[] x509 = kp.getPublic().getEncoded();
+        byte[] pub = new byte[32];
+        System.arraycopy(x509, x509.length - 32, pub, 0, 32);
+
+        assertTrue(Ed25519.verify(pub, sig, msg), "freshly generated signature must verify");
+
+        // S' = S + L. L = 2^252 + 27742317777372353535851937790883648493.
+        java.math.BigInteger order = java.math.BigInteger.TWO.pow(252)
+                .add(new java.math.BigInteger("27742317777372353535851937790883648493"));
+        byte[] sBe = new byte[32];
+        for (int i = 0; i < 32; i++) {
+            sBe[i] = sig[63 - i];
+        }
+        java.math.BigInteger sPlusL = new java.math.BigInteger(1, sBe).add(order);
+        assertTrue(sPlusL.bitLength() <= 256, "S + L fits in 32 bytes for this scalar");
+        byte[] sPlusLbe = toFixed32Be(sPlusL);
+        byte[] sigBadS = sig.clone();
+        for (int i = 0; i < 32; i++) {
+            sigBadS[32 + i] = sPlusLbe[31 - i]; // write little-endian S'
+        }
+        assertFalse(Ed25519.verify(pub, sigBadS, msg), "non-canonical S (S + L) must be rejected");
+    }
+
+    /** Right-align a non-negative BigInteger into exactly 32 big-endian bytes. */
+    private static byte[] toFixed32Be(java.math.BigInteger v) {
+        byte[] raw = v.toByteArray();
+        byte[] out = new byte[32];
+        int copy = Math.min(raw.length, 32);
+        System.arraycopy(raw, raw.length - copy, out, 32 - copy, copy);
+        return out;
+    }
+
     /** True iff SunEC's KeyFactory accepts the 32-byte raw encoding as an Ed25519 public key. */
     private static boolean sunEcAcceptsPublicKey(byte[] rawKey) {
         byte[] prefix = hex("302a300506032b6570032100");

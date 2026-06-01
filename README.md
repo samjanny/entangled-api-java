@@ -138,15 +138,19 @@ CI (`.github/workflows/ci.yml`) runs both on every push.
 - **No hand-rolled crypto primitives.** Ed25519 verification and SHA delegate to
   the JDK (`SunEC`, `MessageDigest`); JCS canonicalization, base64url, BIP-39 PIP
   derivation, and Tor v3 address decoding are implemented in-tree (they are
-  encodings, not cryptographic primitives). For Ed25519 the JDK provides the curve
-  arithmetic, SHA-512, the canonical-`S` (`S < L`) check, canonical point-encoding
-  rejection, and the cofactorless verification equation section 05:178 mandates.
-  `SunEC` does not reject small-order points, so `Ed25519` adds the one missing
-  strict-profile check (small-order rejection of both `A` and `R`, section 05:174)
-  as a thin layer over the JDK verifier, exactly as section 05:180 directs. The
-  small-order check is a constant-table comparison, not curve arithmetic. The
-  result matches `ed25519-dalek` `verify_strict` on all 15 `ed25519-speccheck`
-  vectors, which `CryptoTest` pins.
+  encodings, not cryptographic primitives). Only the irreducible curve operations
+  are left to the JDK: the on-curve decoding of `A` and `R`, SHA-512, and the
+  cofactorless verification equation section 05:178 mandates. Every strict-profile
+  accept/reject *policy* is decided by `Ed25519` itself, before delegating, so
+  acceptance does not depend on the provider's internal point/scalar handling:
+  non-canonical point encodings of `A` and `R` (`y >= p`, section 05:154, 05:168),
+  small-order points `A` and `R` (section 05:155, 05:174), and a non-canonical
+  scalar `S` (`S >= L`, section 05:169). `SunEC` does not reject the non-canonical
+  encodings or small-order points, and although it does reject `S >= L` the layer
+  re-checks it so the policy is not delegated. These checks are constant-table or
+  integer-bound comparisons, not curve arithmetic, added over the JDK verifier
+  exactly as section 05:180 directs. The result matches `ed25519-dalek`
+  `verify_strict` on all 15 `ed25519-speccheck` vectors, which `CryptoTest` pins.
 - **First-failing-stage precedence** (section 10) is enforced by running the
   10-stage pipeline in order and converting the first stage's rejection into the
   verdict.

@@ -34,30 +34,38 @@ import java.util.Arrays;
  *       forbids the cofactored equation {@code [8S]B = [8]R + [8][k]A}.</li>
  * </ul>
  *
- * <p><b>What the JDK already enforces.</b> {@code SunEC}'s Ed25519 verify rejects
- * a non-canonical scalar {@code S} ({@code S >= L}), and -- critically for
- * section 05:178 -- it evaluates the <em>cofactorless</em> equation, so it
- * rejects mixed-order (torsion-laden) points that a cofactored verifier would
- * accept. Those checks are not re-implemented here.
+ * <p><b>What is delegated to the JDK.</b> Only the irreducible curve operations
+ * are left to {@code SunEC}: the on-curve decoding of {@code A} and {@code R},
+ * SHA-512, and -- critically for section 05:178 -- the evaluation of the
+ * <em>cofactorless</em> equation, so mixed-order (torsion-laden) points that a
+ * cofactored verifier would accept are rejected. These are not re-implemented
+ * here; reimplementing curve arithmetic would be hand-rolled crypto.
  *
- * <p><b>What the JDK does not do, and this layer adds.</b> Two strict-profile
- * rejections of {@code A} and {@code R} are performed here, before delegating:
+ * <p><b>What this layer decides itself, before delegating.</b> Every
+ * strict-profile accept/reject <em>policy</em> is made here, so acceptance does
+ * not depend on the provider's internal point/scalar policy:
  * <ul>
- *   <li><b>non-canonical point encodings</b> ({@code y >= p}, sign bit masked
- *       off) (section 05:154, 05:168). {@code SunEC} does NOT reject these: it
- *       reduces {@code y} modulo {@code p} (ZIP-215 style) and verifies against
- *       the reduced point, so a non-canonical encoding of the genuine key,
- *       presented with a signature valid under the reduced point, would
- *       otherwise be accepted. The check compares the little-endian {@code y}
- *       against {@code p = 2^255 - 19}.</li>
- *   <li><b>small-order points</b> (order dividing the cofactor 8) (section
- *       05:155, 05:174). {@code SunEC} does not reject these either. The check
- *       is a constant-table comparison against the eight known small-order point
- *       encodings on edwards25519 -- it performs no curve arithmetic of its own.</li>
+ *   <li><b>non-canonical point encodings</b> of {@code A} and {@code R}
+ *       ({@code y >= p}, sign bit masked off) (section 05:154, 05:168).
+ *       {@code SunEC} does NOT reject these: it reduces {@code y} modulo
+ *       {@code p} (ZIP-215 style) and verifies against the reduced point, so a
+ *       non-canonical encoding of the genuine key, presented with a signature
+ *       valid under the reduced point, would otherwise be accepted. The check
+ *       compares the little-endian {@code y} against {@code p = 2^255 - 19}.</li>
+ *   <li><b>small-order points</b> {@code A} and {@code R} (order dividing the
+ *       cofactor 8) (section 05:155, 05:174). {@code SunEC} does not reject
+ *       these either. The check is a constant-table comparison against the eight
+ *       known small-order point encodings on edwards25519.</li>
+ *   <li><b>non-canonical scalar</b> {@code S} ({@code S >= L}) (section 05:169).
+ *       {@code SunEC} does reject this today, but the rejection is made here too,
+ *       as a little-endian compare of {@code S} against the group order
+ *       {@code L}, so the policy is not delegated to the provider.</li>
  * </ul>
- * Both match the {@code verify_strict} mode in {@code ed25519-dalek} that section
- * 05 names as the reference (it rejects when {@code signature_R.is_small_order()}
- * or {@code A.is_small_order()} and rejects non-canonical compressed points).
+ * None of these checks perform curve arithmetic; they are constant-table or
+ * integer-bound comparisons. All three match the {@code verify_strict} mode in
+ * {@code ed25519-dalek} that section 05 names as the reference (it rejects when
+ * {@code signature_R.is_small_order()} or {@code A.is_small_order()}, rejects
+ * non-canonical compressed points, and checks {@code S < L}).
  *
  * <p><b>Conformance is measured, not assumed.</b> Run against the 15
  * {@code ed25519-speccheck} vectors (Chalkias-Garillot-Nikolaenko, "Taming the
@@ -133,8 +141,20 @@ public final class Ed25519 {
         if (isSmallOrder(publicKey) || isSmallOrder(r)) {
             return false;
         }
-        // Delegate the canonical-S check, SHA-512, and the cofactorless RFC 8032
-        // verification equation to the JDK (SunEC).
+        // 3. Reject a non-canonical scalar S (section 05:169): S, little-endian,
+        //    MUST satisfy 0 <= S < L. SunEC does enforce this today, but the
+        //    strict-profile accept/reject policy is decided here, in-layer, so
+        //    that acceptance does not depend on the provider's internal scalar
+        //    policy. This is an integer bound check, not curve arithmetic.
+        if (!isCanonicalScalarS(signature)) {
+            return false;
+        }
+        // Only the irreducible curve operations are delegated to the JDK
+        // (SunEC): the on-curve decoding of A and R, SHA-512, and the
+        // cofactorless RFC 8032 verification equation [S]B = R + [k]A. Every
+        // strict-profile accept/reject decision above this point is made by this
+        // layer, not by the provider. The provider is pinned to the platform
+        // Ed25519 service; any failure, or its absence, rejects (fail closed).
         try {
             PublicKey key = KeyFactory.getInstance("Ed25519")
                     .generatePublic(new X509EncodedKeySpec(x509Wrap(publicKey)));
@@ -187,6 +207,19 @@ public final class Ed25519 {
         return ltLe32(y, ED25519_FIELD_PRIME_LE);
     }
 
+    // The order of the Ed25519 base point, L = 2^252 +
+    // 27742317777372353535851937790883648493, as 32 little-endian bytes. A
+    // canonical signature scalar satisfies 0 <= S < L (RFC 8032 section 5.1.7,
+    // section 05:169).
+    private static final byte[] ED25519_GROUP_ORDER_LE =
+            hex("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010");
+
+    /** True iff S (the trailing 32 bytes of the signature) is canonical: S &lt; L. */
+    private static boolean isCanonicalScalarS(byte[] signature) {
+        byte[] s = Arrays.copyOfRange(signature, 32, 64);
+        return ltLe32(s, ED25519_GROUP_ORDER_LE);
+    }
+
     /**
      * The section 05 strict profile for a public key that verifies no document
      * in the current context (e.g. {@code origin.origin_pubkey}, section 05:157,
@@ -206,6 +239,17 @@ public final class Ed25519 {
         System.arraycopy(X509_ED25519_PREFIX, 0, out, 0, X509_ED25519_PREFIX.length);
         System.arraycopy(rawKey, 0, out, X509_ED25519_PREFIX.length, rawKey.length);
         return out;
+    }
+
+    /**
+     * Package-private view of {@link #x509Wrap} for the boundary-invariant tests:
+     * the wrapping is an X.509 envelope around the raw key, never a modification
+     * of the 32 verified key bytes. The test pins it byte-exact against the JDK's
+     * own {@code getEncoded()} so SunEC never decodes a key other than the one
+     * this layer validated.
+     */
+    static byte[] x509WrapForTest(byte[] rawKey) {
+        return x509Wrap(rawKey);
     }
 
     private static byte[] hex(String s) {
