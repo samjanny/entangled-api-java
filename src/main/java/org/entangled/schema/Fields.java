@@ -107,6 +107,22 @@ public final class Fields {
 
     /** Require NFC for a user-visible text field (section 04); non-NFC is E_SCHEMA_FIELD_SYNTAX. */
     public static void requireNfc(String s) {
+        // section 04 (AMB-24): a user-visible string MUST contain only code points
+        // assigned in the pinned Unicode version (15.0). Reject any unassigned
+        // code point before the NFC check, so implementations on different Unicode
+        // Character Database versions cannot disagree on a newer code point's
+        // normalization (normalization stability fixes NFC for an assigned code
+        // point across later versions). Character.isDefined reflects the JDK's
+        // Unicode version, which is 15.0 on the targeted JDK 21 (the pinned
+        // baseline); a UCD-version guard in the test suite fails loudly if the JDK
+        // moves off 15.0.
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            if (!Character.isDefined(cp)) {
+                throw syntax();
+            }
+            i += Character.charCount(cp);
+        }
         if (!Normalizer.isNormalized(s, Normalizer.Form.NFC)) {
             throw syntax();
         }
