@@ -2181,6 +2181,90 @@ def negative_vectors(keys) -> list[dict]:
         },
     ))
 
+    # ---- 165/166/167: link target URL RFC 3986 character set (AMB-22) ----
+    # §03:586 (carrier) and §03:616 (citation) require the link target url to
+    # contain only valid RFC 3986 characters; a byte outside the
+    # unreserved/reserved set, or a malformed percent-triplet, is rejected at
+    # Stage 5 as E_SCHEMA_FIELD_SYNTAX. Distinct from 158 (a non-onion host that
+    # is itself RFC-3986-valid): these exercise the character set and
+    # percent-encoding. Each carries a single live violation. Signed by K_runtime.
+    c_cite_badchar = make_content(
+        runtime_priv=rp, path="/cite-badchar", title="Citation bad char",
+        blocks=[{
+            "kind": "link",
+            "label": [{"kind": "text", "value": "Source", "marks": []}],
+            "target": {"kind": "citation", "url": "https://example.org/a<b"},
+        }],
+    )
+    out.append(vec(
+        "165-link-citation-url-bad-char",
+        kind="content",
+        description="Content document with a link block whose citation target URL is https://example.org/a<b. The < (0x3C) is outside the RFC 3986 unreserved/reserved set, so per §03:616 the URL violates its declared character syntax and is rejected at Stage 5 as E_SCHEMA_FIELD_SYNTAX. The https:// scheme and 1 KiB cap are satisfied, so the disallowed character is the only live violation. Signed by K_runtime.",
+        spec_refs=["§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_FIELD_SYNTAX",
+        body_obj=c_cite_badchar,
+        context={"fetched_path": c_cite_badchar["path"], "expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    c_cite_badpct = make_content(
+        runtime_priv=rp, path="/cite-badpct", title="Citation bad percent",
+        blocks=[{
+            "kind": "link",
+            "label": [{"kind": "text", "value": "Source", "marks": []}],
+            "target": {"kind": "citation", "url": "https://x.org/%ZZ"},
+        }],
+    )
+    out.append(vec(
+        "166-link-citation-url-bad-percent",
+        kind="content",
+        description="Content document with a link block whose citation target URL is https://x.org/%ZZ. The % does not introduce a valid percent-encoded triplet (ZZ are not hex digits), so per §03:616 and RFC 3986 the URL violates its declared syntax and is rejected at Stage 5 as E_SCHEMA_FIELD_SYNTAX. The scheme and length cap are satisfied, so the malformed percent-triplet is the only live violation. Signed by K_runtime.",
+        spec_refs=["§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_FIELD_SYNTAX",
+        body_obj=c_cite_badpct,
+        context={"fetched_path": c_cite_badpct["path"], "expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    c_carrier_badchar = make_content(
+        runtime_priv=rp, path="/carrier-badchar", title="Carrier bad char",
+        blocks=[{
+            "kind": "link",
+            "label": [{"kind": "text", "value": "Mirror", "marks": []}],
+            "target": {"kind": "carrier", "carrier": "tor-v3",
+                       "url": "http://" + onion_address(op_pub) + "/a<b"},
+        }],
+    )
+    out.append(vec(
+        "167-link-carrier-url-bad-char",
+        kind="content",
+        description="Content document with a link block whose carrier target URL is http://<valid 56-char onion>.onion/a<b. The onion host is a valid tor-v3 carrier address, but the < (0x3C) in the path is outside the RFC 3986 unreserved/reserved set, so per §03:586 the URL violates its declared character syntax and is rejected at Stage 5 as E_SCHEMA_FIELD_SYNTAX. The disallowed path character is the only live violation. Signed by K_runtime.",
+        spec_refs=["§03", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_FIELD_SYNTAX",
+        body_obj=c_carrier_badchar,
+        context={"fetched_path": c_carrier_badchar["path"], "expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    # ---- 168-schema-null-array-element (Stage 5, E_SCHEMA_NULL_VALUE; AMB-25) ----
+    # §04 forbids a null literal at ANY position. The existing null vector (132)
+    # places null at an object member (navigation); this places it as an array
+    # element (content blocks:[null]). Per §04:47 / §11 the code is
+    # E_SCHEMA_NULL_VALUE, not E_SCHEMA_FIELD_TYPE. Signed by K_runtime.
+    c_null_arr = make_content(
+        runtime_priv=rp, path="/null-element", title="Null element", blocks=[None],
+    )
+    out.append(vec(
+        "168-schema-null-array-element",
+        kind="content",
+        description="Content document whose blocks array contains a JSON null literal as its single element (blocks:[null]). §04 forbids a null literal at any position, including as an array element; per §11 this is E_SCHEMA_NULL_VALUE, not E_SCHEMA_FIELD_TYPE. Distinct from vector 132, which places null at an object member. Signed by K_runtime.",
+        spec_refs=["§04", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_NULL_VALUE",
+        body_obj=c_null_arr,
+        context={"fetched_path": c_null_arr["path"], "expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
     # ---- 177-origin-invalid-beyond-5y (E_ORIGIN_INVALID, second reason) ----
     # Manifest whose origin.not_after is more than 5 years after
     # canary.issued_at. §06 caps not_after at 5 years past issued_at; this
@@ -2837,7 +2921,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.40",
+        "rc_target": "1.0-rc.41",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,

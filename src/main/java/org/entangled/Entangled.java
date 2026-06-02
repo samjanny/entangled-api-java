@@ -16,7 +16,7 @@ public final class Entangled {
     public static final String SPEC_VERSION = "1.0";
 
     /** The spec revision this implementation was read against. */
-    public static final String SPEC_REVISION = "1.0-rc.40";
+    public static final String SPEC_REVISION = "1.0-rc.41";
 
     private Entangled() {
     }

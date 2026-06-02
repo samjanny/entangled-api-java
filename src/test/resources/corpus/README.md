@@ -91,9 +91,10 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 | 146-147 | Stage 5 schema (empty mandatory array, nested inline link) |
 | 148-149 | Stage 5 transaction state_updates (value over the 4096-byte hard ceiling, ttl outside 300..7776000) |
 | 150-157 | Stage 6 signature (modified payload, malformed length, non-canonical S, small-order A, non-canonical R, non-canonical A, missing-key context, small-order R) |
-| 158     | Stage 5 link target (carrier URL host not a valid tor-v3 onion address) |
+| 158, 165-167 | Stage 5 link target URL (carrier URL host not a valid tor-v3 onion address; citation/carrier URL outside the RFC 3986 character set or carrying a malformed percent-encoded triplet) |
 | 160-162 | Strict base64url (padding, alphabet, whitespace) |
 | 163-164 | Stage 5 transaction state_updates operation-form schema (unknown `op` closed-enum violation E_SCHEMA_ENUM_VIOLATION, missing operation-form field E_SCHEMA_REQUIRED_FIELD) |
+| 168     | Stage 5 schema (null literal as an array element, E_SCHEMA_NULL_VALUE; cf. 132 null object member) |
 | 170-179 | Stage 9 binding (path mismatch, reserved path, request_hash, request_id, origin binding, origin not_after semantic constraints including both `reason` values, manifest.updated future-skew) |
 | 180-189 | Canary (equal `issued_at` conflict, anti-downgrade, interval-bounds violation, issued_at future-skew, runtime-key reuse) |
 | 190-199 | Unicode and canonicalization (NFD vs NFC) |

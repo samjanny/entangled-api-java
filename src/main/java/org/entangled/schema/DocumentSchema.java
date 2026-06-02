@@ -72,6 +72,14 @@ public final class DocumentSchema {
      * check; vector 140 is the falsification condition. Filed as an ambiguity.)
      */
     public static void scanNumericGrammar(JsonValue v) {
+        if (v instanceof JsonValue.Null) {
+            // Section 04 forbids a null literal at ANY position. Closed.check
+            // catches a null object member, but a null array element reaches a
+            // typed extractor (E_SCHEMA_FIELD_TYPE) unless caught here. This
+            // whole-document pre-pass runs before the typed extractors, so a null
+            // anywhere (object member or array element) is E_SCHEMA_NULL_VALUE.
+            throw new RejectException(DiagnosticCode.E_SCHEMA_NULL_VALUE);
+        }
         if (v instanceof JsonValue.Num n) {
             if (!n.conformingInteger()) {
                 throw new RejectException(DiagnosticCode.E_SCHEMA_NON_INTEGER);

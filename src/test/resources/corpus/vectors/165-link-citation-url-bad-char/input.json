@@ -1,0 +1,1 @@
+{"spec_version":"1.0","kind":"content","path":"/cite-badchar","meta":{"title":"Citation bad char","published_at":"2026-05-07T00:00:00Z"},"blocks":[{"kind":"link","label":[{"kind":"text","value":"Source","marks":[]}],"target":{"kind":"citation","url":"https://example.org/a<b"}}],"sig":"Ey1Qkkt_43RQswj1yV9iDgS0nJ8QlLUtHt3ZZ_skcScxeuVdO30ZoNHj65sYbxP_Iu5NOoLEuOFEwF6zF-kCBA"}

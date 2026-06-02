@@ -1,5 +1,6 @@
 package org.entangled.schema;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -168,7 +169,7 @@ public final class Inline {
         if (!url.startsWith("http://") || Fields.utf8Len(url) > 1024) {
             throw Fields.syntax();
         }
-        noControlOrSpace(url);
+        rfc3986Chars(url);
         // section 03:584: the URL host MUST be a valid carrier address for the
         // declared carrier; for tor-v3, a 56-char onion address plus ".onion".
         validateOnionAddress(authorityHost(url.substring("http://".length())));
@@ -201,16 +202,49 @@ public final class Inline {
         if (!url.startsWith("https://") || Fields.utf8Len(url) > 1024) {
             throw Fields.syntax();
         }
-        noControlOrSpace(url);
+        rfc3986Chars(url);
     }
 
-    private static void noControlOrSpace(String url) {
-        for (int i = 0; i < url.length(); i++) {
-            char c = url.charAt(i);
-            if (c < 0x20 || c == 0x7F) {
+    /**
+     * RFC 3986 URL character validation (section 03:586 carrier, section 03:616
+     * citation): a url may contain only unreserved / reserved characters and
+     * complete percent-encoded triplets. Any other byte (control characters, the
+     * space 0x20, characters such as {@code <} {@code >}, and any byte
+     * {@code >= 0x80}) or a malformed percent-triplet is E_SCHEMA_FIELD_SYNTAX.
+     * Mirrors the Rust reference (validate_url_common). This subsumes the prior
+     * control-character-only check.
+     */
+    private static void rfc3986Chars(String url) {
+        byte[] bytes = url.getBytes(StandardCharsets.UTF_8);
+        int i = 0;
+        while (i < bytes.length) {
+            int b = bytes[i] & 0xFF;
+            if (b == '%') {
+                if (i + 2 >= bytes.length || !isHexByte(bytes[i + 1]) || !isHexByte(bytes[i + 2])) {
+                    throw Fields.syntax();
+                }
+                i += 3;
+                continue;
+            }
+            if (!isRfc3986UnencodedByte(b)) {
                 throw Fields.syntax();
             }
+            i++;
         }
+    }
+
+    private static boolean isHexByte(byte b) {
+        int c = b & 0xFF;
+        return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+    }
+
+    /** RFC 3986 unreserved + gen-delims + sub-delims: the bytes legal unencoded. */
+    private static boolean isRfc3986UnencodedByte(int b) {
+        return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+                || b == '-' || b == '.' || b == '_' || b == '~'
+                || b == ':' || b == '/' || b == '?' || b == '#' || b == '[' || b == ']' || b == '@'
+                || b == '!' || b == '$' || b == '&' || b == '\'' || b == '(' || b == ')' || b == '*'
+                || b == '+' || b == ',' || b == ';' || b == '=';
     }
 
     static JsonValue require(JsonValue.Obj obj, String key) {
