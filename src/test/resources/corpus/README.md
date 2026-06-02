@@ -82,7 +82,7 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 |---|---|
 | 001-099 | Positive (must be accepted) |
 | 100-109 | Stage 2 input checks (BOM, UTF-8, byte cap) |
-| 110-119 | Stage 3 JSON parsing (duplicate keys, nesting depth, string length, array length, object keys, malformed JSON) |
+| 110-119 | Stage 3 JSON parsing (duplicate keys, nesting depth, string length, array length, object keys, malformed JSON; and the Stage-3-limit-vs-numeric-grammar precedence vectors 117/118, where a structural limit co-occurs with a non-integer token and the Stage 3 limit code wins) |
 | 120-129 | Stage 4 kind discrimination (spec_version, unknown kind, missing required top-level field) |
 | 130-139 | Stage 5 schema (unknown field, missing required, null literal, unknown block kind, field type, field range, block not permitted in document kind, duplicate uniqueness-required entry, malformed Unicode, field-specific length cap) |
 | 140-142 | Numeric grammar (float, exponent, overflow) |
