@@ -89,7 +89,7 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 | 143     | Stage 5 semantic - submit-budget state-policy aggregate overflow |
 | 144-145 | Stage 5 origin field (carrier enum violation, non-canonical address syntax) |
 | 146-147 | Stage 5 schema (empty mandatory array, nested inline link) |
-| 148-149 | Stage 5 transaction state_updates (value over the 4096-byte hard ceiling, ttl outside 300..7776000) |
+| 148-149, 169 | Stage 5 transaction state_updates (value over the 4096-byte hard ceiling, ttl outside 300..7776000 including a conforming integer above u32::MAX, both E_STATE_TTL) |
 | 150-157 | Stage 6 signature (modified payload, malformed length, non-canonical S, small-order A, non-canonical R, non-canonical A, missing-key context, small-order R) |
 | 158, 165-167 | Stage 5 link target URL (carrier URL host not a valid tor-v3 onion address; citation/carrier URL outside the RFC 3986 character set or carrying a malformed percent-encoded triplet) |
 | 160-162 | Strict base64url (padding, alphabet, whitespace) |
