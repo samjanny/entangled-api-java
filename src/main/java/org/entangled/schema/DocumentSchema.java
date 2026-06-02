@@ -110,11 +110,17 @@ public final class DocumentSchema {
         // issuedAt is null when canary.issued_at is not a valid timestamp; the
         // origin not_after cross-field check then defers (Stage 8 reports it).
         Long issuedAt = validateCanary(Fields.obj(doc.get("canary")));
-        validateOrigin(Fields.obj(doc.get("origin")), issuedAt);
+        // AMB-28: pin the intra-Stage-5 reporting order so the diagnostic code is
+        // deterministic cross-implementation when more than one of these checks
+        // would fail: manifest.updated future-skew (E_SCHEMA_FIELD_SYNTAX) ->
+        // state_policy submit-budget aggregate (E_SUBMIT_BUDGET) -> origin.not_after
+        // constraint (E_ORIGIN_INVALID) -> migration_pointer (E_MIGRATION_INVALID).
+        // (Other per-field checks below retain the section 10:160 within-stage latitude.)
+        validateUpdated(Fields.str(doc.get("updated")), nowEpoch);
         validateStatePolicy(Fields.arr(doc.get("state_policy")));
         validateNavigation(Fields.arr(doc.get("navigation")));
         Fields.integerInRange(doc.get("min_refresh_interval"), 300, 604800);
-        validateUpdated(Fields.str(doc.get("updated")), nowEpoch);
+        validateOrigin(Fields.obj(doc.get("origin")), issuedAt);
 
         if (doc.has("migration_pointer")) {
             validateMigrationPointer(Fields.obj(doc.get("migration_pointer")), doc);
