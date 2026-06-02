@@ -131,28 +131,17 @@ public final class Stage9Binding {
         Context successorCtx = new Context(ctx.nowEpoch);
         successorCtx.fetchedOriginAddress = successorAddress;
         // The successor manifest is attacker-controlled (fetched from the
-        // announced successor onion address). It is parsed here for the cycle
-        // pre-check; invalid JSON throws E_PARSE_* (a clean reject), but a
-        // valid-JSON value that is not the manifest shape this code expects must
-        // not crash with an unchecked cast. A non-object body, or a body whose
-        // migration_pointer / successor_origin / fields are the wrong type, is
-        // left for the successor's own pipeline run below to reject as
-        // E_MIGRATION_MISMATCH; only a well-formed successor reaches the typed
-        // comparisons.
+        // announced successor onion address). It is parsed here so the
+        // post-verification checks (publisher continuity, binding equality, and
+        // the second-hop chain cycle) can read its fields; invalid JSON throws
+        // E_PARSE_* (a clean reject), but a valid-JSON value that is not the
+        // manifest shape this code expects must not crash with an unchecked
+        // cast. A non-object body, or a body whose migration_pointer /
+        // successor_origin / fields are the wrong type, is left for the
+        // successor's own pipeline run below to reject as E_MIGRATION_MISMATCH;
+        // only a well-formed successor reaches the typed comparisons.
         JsonValue parsedSuccessor = JsonParser.parse(new String(ctx.successorManifest, StandardCharsets.UTF_8));
         JsonValue.Obj successorDoc = parsedSuccessor instanceof JsonValue.Obj obj ? obj : null;
-
-        // The successor may itself announce a migration; detect a cycle back to
-        // the announcing origin before recursing into its own migration step.
-        // The peek is type-guarded: a malformed migration_pointer simply does not
-        // trigger the cycle reason and falls through to the pipeline run.
-        if (successorDoc != null) {
-            String sSuccAddr = nestedString(successorDoc, "migration_pointer", "successor_origin", "address");
-            if (sSuccAddr != null && sSuccAddr.equals(announcingAddress)) {
-                // A -> B -> A: the successor announces a return to the announcing origin.
-                throw migrationInvalid("chain_cycle", successorAddress, announcingAddress);
-            }
-        }
 
         Verdict successorVerdict = new Pipeline(successorCtx).run(ctx.successorManifest);
         if (!successorVerdict.isAccepted()) {
@@ -187,6 +176,18 @@ public final class Stage9Binding {
         String successorDocPubkey = ((JsonValue.Str) successorDocOrigin.get("origin_pubkey")).value();
         if (!successorDocPubkey.equals(((JsonValue.Str) successorOrigin.get("origin_pubkey")).value())) {
             throw mismatch("origin_pubkey");
+        }
+
+        // Second-hop chain cycle (AMB-26): only after the successor has passed its
+        // own full pipeline and the publisher/binding continuity checks does it
+        // become a verified pending successor (section 10:398-411); only then is
+        // its own announcement processed. A successor that announces a return to
+        // the announcing origin (already in visited_origins) is a chain cycle. A
+        // broken successor surfaces E_MIGRATION_MISMATCH above, before this point,
+        // so the cycle check never preempts the successor-verification failure.
+        String secondHop = nestedString(successorDoc, "migration_pointer", "successor_origin", "address");
+        if (secondHop != null && secondHop.equals(announcingAddress)) {
+            throw migrationInvalid("chain_cycle", successorAddress, announcingAddress);
         }
     }
 
