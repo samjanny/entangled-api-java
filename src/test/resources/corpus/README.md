@@ -92,6 +92,7 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 | 148-149, 169 | Stage 5 transaction state_updates (value over the 4096-byte hard ceiling, ttl outside 300..7776000 including a conforming integer above u32::MAX, both E_STATE_TTL) |
 | 150-157 | Stage 6 signature (modified payload, malformed length, non-canonical S, small-order A, non-canonical R, non-canonical A, missing-key context, small-order R) |
 | 158, 165-167 | Stage 5 link target URL (carrier URL host not a valid tor-v3 onion address; citation/carrier URL outside the RFC 3986 character set or carrying a malformed percent-encoded triplet) |
+| 159     | Stage 5 manifest cross-field reporting precedence (co-occurring E_SUBMIT_BUDGET + E_ORIGIN_INVALID; the submit-budget aggregate is reported first per AMB-28) |
 | 160-162 | Strict base64url (padding, alphabet, whitespace) |
 | 163-164 | Stage 5 transaction state_updates operation-form schema (unknown `op` closed-enum violation E_SCHEMA_ENUM_VIOLATION, missing operation-form field E_SCHEMA_REQUIRED_FIELD) |
 | 168     | Stage 5 schema (null literal as an array element, E_SCHEMA_NULL_VALUE; cf. 132 null object member) |

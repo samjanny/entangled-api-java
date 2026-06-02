@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import org.entangled.DiagnosticCode;
 import org.entangled.RejectException;
+import org.entangled.crypto.Base64Url;
+import org.entangled.crypto.Ed25519;
 import org.entangled.json.JsonParser;
 import org.entangled.json.JsonValue;
 import org.entangled.schema.Rfc3339;
@@ -76,6 +78,23 @@ public final class Stage8Canary {
 
         String publisherPubkey = ((JsonValue.Str) doc.get("publisher_pubkey")).value();
         String runtimePubkey = ((JsonValue.Str) canary.get("runtime_pubkey")).value();
+
+        // section 05 strict profile on canary.runtime_pubkey (AMB-23): a
+        // non-canonical or small-order runtime key is rejected here at Stage 8 as
+        // E_CANARY_INVALID, rather than surfacing only when a content or
+        // transaction document is later verified under it (E_SIG_VERIFICATION).
+        // The manifest itself is signed under K_publisher, so the bad runtime key
+        // does not otherwise affect manifest verification; failing at canary
+        // structure time aligns the rejection point with manifest acceptance.
+        // Stage 5 already validated the base64url/32-byte form, so the decode here
+        // does not throw. Matches the Rust reference.
+        if (!Ed25519.isStrictProfilePubkey(Base64Url.decode(runtimePubkey, 32))) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("field_path", "canary.runtime_pubkey");
+            details.put("reason", "public_key_rejected");
+            throw new RejectException(DiagnosticCode.E_CANARY_INVALID, details);
+        }
+
         String currentPayload = new String(Pipeline.canonicalPayloadMinusSig(doc), StandardCharsets.UTF_8);
 
         List<HistoryEntry> history = parseHistory(ctx);
