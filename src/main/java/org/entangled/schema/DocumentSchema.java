@@ -1,12 +1,15 @@
 package org.entangled.schema;
 
 import java.math.BigInteger;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.entangled.DiagnosticCode;
 import org.entangled.RejectException;
+import org.entangled.crypto.Base64Url;
+import org.entangled.crypto.TorV3Address;
 import org.entangled.json.JsonValue;
 
 /**
@@ -20,7 +23,13 @@ import org.entangled.json.JsonValue;
  *       ({@code E_SUBMIT_BUDGET}, section 07/section 09);</li>
  *   <li>{@code manifest.updated} future-skew beyond the 300s tolerance
  *       ({@code E_SCHEMA_FIELD_SYNTAX} with {@code reason=future_beyond_skew_tolerance},
- *       section 10).</li>
+ *       section 10);</li>
+ *   <li>the announcement-internal {@code migration_pointer} semantic checks
+ *       ({@code E_MIGRATION_INVALID} reasons {@code self_pointer},
+ *       {@code carrier_mismatch}, {@code announced_at_after_updated}, and
+ *       {@code successor_key_mismatch}; AMB-19, section 06/section 10). Only
+ *       {@code chain_cycle}, which needs the per-flow visited-origins set, stays
+ *       a Stage 9 check (see {@link org.entangled.pipeline.Stage9Binding}).</li>
  * </ul>
  *
  * <p>The signature ({@code sig}) is validated here only for base64url syntax and
@@ -313,10 +322,55 @@ public final class DocumentSchema {
         Fields.base64url(Fields.str(successor.get("origin_pubkey")), 32);
         String announcedAt = Fields.str(mp.get("announced_at"));
         Fields.rfc3339(announcedAt);
-        // Note: the semantic checks (self-pointer, announced_at vs updated,
-        // carrier match, successor address-to-key binding, chain cycle) are
-        // Stage 9 migration checks (E_MIGRATION_INVALID / E_MIGRATION_MISMATCH),
-        // handled by the pipeline, not here.
+
+        // Announcement-internal migration_pointer semantic checks (AMB-19, rc.38).
+        // These are closed-schema cross-field checks on the announcing manifest
+        // alone, in the same class as the origin.not_after vs canary.issued_at
+        // checks (E_ORIGIN_INVALID): they are computable from the announcing
+        // manifest's bytes without fetching the successor or entering a
+        // migration-resolution flow, so they are evaluated here at Stage 5, not
+        // at Stage 9. Only chain_cycle, which needs the per-flow visited_origins
+        // set, is a Stage 9 / section 10 check (see Stage9Binding). origin and
+        // updated were already validated above (validateOrigin, validateUpdated).
+        JsonValue.Obj origin = Fields.obj(manifest.get("origin"));
+        String announcingAddress = Fields.str(origin.get("address"));
+        String successorAddress = Fields.str(successor.get("address"));
+        // self_pointer: successor address equals announcing address.
+        if (successorAddress.equals(announcingAddress)) {
+            throw migrationInvalid("self_pointer", announcingAddress, successorAddress);
+        }
+        // announced_at_after_updated: announced_at must not be later than updated.
+        String updated = Fields.str(manifest.get("updated"));
+        if (Rfc3339.epochSeconds(announcedAt) > Rfc3339.epochSeconds(updated)) {
+            throw migrationInvalid("announced_at_after_updated", announcingAddress, successorAddress);
+        }
+        // carrier_mismatch: successor carrier must equal announcing carrier.
+        String announcingCarrier = Fields.str(origin.get("carrier"));
+        String successorCarrier = Fields.str(successor.get("carrier"));
+        if (!announcingCarrier.equals(successorCarrier)) {
+            throw migrationInvalid("carrier_mismatch", announcingAddress, successorAddress);
+        }
+        // successor_key_mismatch: successor address must decode to the declared
+        // successor origin_pubkey (announcement-internal address-to-key binding,
+        // section 06). Address and pubkey syntax are already validated above.
+        byte[] declaredSuccessorPubkey = Base64Url.decode(Fields.str(successor.get("origin_pubkey")), 32);
+        byte[] derived;
+        try {
+            derived = TorV3Address.decodePublicKey(successorAddress);
+        } catch (TorV3Address.InvalidOnionAddress e) {
+            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
+        }
+        if (!Arrays.equals(declaredSuccessorPubkey, derived)) {
+            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
+        }
+    }
+
+    private static RejectException migrationInvalid(String reason, String announcing, String successor) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", reason);
+        details.put("announcing_origin_address", announcing);
+        details.put("successor_origin_address", successor);
+        return new RejectException(DiagnosticCode.E_MIGRATION_INVALID, details);
     }
 
     // --- content sub-objects ---

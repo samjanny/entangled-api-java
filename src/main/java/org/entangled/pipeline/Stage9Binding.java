@@ -22,11 +22,13 @@ import org.entangled.schema.Rfc3339;
  *
  * <p>Manifest: Tor v3 origin binding ({@code E_BIND_ORIGIN}); {@code origin.not_after}
  * expiry with the symmetric 300s past-bound tolerance ({@code E_ORIGIN_EXPIRED});
- * and, when a {@code migration_pointer} is present, the announcement-internal
- * successor key binding ({@code E_MIGRATION_INVALID} reason
- * {@code successor_key_mismatch}), the self-pointer / cycle checks
- * ({@code E_MIGRATION_INVALID}), and the fetched-successor verification
- * ({@code E_MIGRATION_MISMATCH}).
+ * and, when a {@code migration_pointer} is present, the fetched-successor
+ * verification ({@code E_MIGRATION_MISMATCH}) and the per-flow {@code chain_cycle}
+ * determination ({@code E_MIGRATION_INVALID}). The announcement-internal
+ * {@code migration_pointer} semantic checks ({@code E_MIGRATION_INVALID} reasons
+ * {@code self_pointer}, {@code carrier_mismatch}, {@code announced_at_after_updated},
+ * and {@code successor_key_mismatch}) moved to Stage 5 and now run in
+ * {@link org.entangled.schema.DocumentSchema} (AMB-19, rc.38).
  *
  * <p>Content: byte-exact {@code path} binding ({@code E_BIND_PATH}). Transaction:
  * {@code in_response_to} ({@code E_BIND_RESPONSE_PATH}), {@code request_id}
@@ -99,45 +101,22 @@ public final class Stage9Binding {
     // --- migration ---
 
     private static void migration(JsonValue.Obj doc, Context ctx) {
+        // The announcement-internal migration_pointer semantic checks
+        // (self_pointer, announced_at_after_updated, carrier_mismatch,
+        // successor_key_mismatch) are Stage 5 closed-schema checks on the
+        // announcing manifest and run in DocumentSchema (AMB-19, rc.38). Stage 9
+        // owns only the fetch-time successor verification and the per-flow
+        // chain_cycle determination, both of which need the fetched successor
+        // manifest and the navigation flow.
+        if (ctx.successorManifest == null) {
+            return;
+        }
         JsonValue.Obj origin = (JsonValue.Obj) doc.get("origin");
         String announcingAddress = ((JsonValue.Str) origin.get("address")).value();
         JsonValue.Obj mp = (JsonValue.Obj) doc.get("migration_pointer");
         JsonValue.Obj successorOrigin = (JsonValue.Obj) mp.get("successor_origin");
         String successorAddress = ((JsonValue.Str) successorOrigin.get("address")).value();
-        String successorPubkeyB64u = ((JsonValue.Str) successorOrigin.get("origin_pubkey")).value();
-        String announcedAt = ((JsonValue.Str) mp.get("announced_at")).value();
-        String updated = ((JsonValue.Str) doc.get("updated")).value();
-
-        // Self-pointer: successor address equals announcing address.
-        if (successorAddress.equals(announcingAddress)) {
-            throw migrationInvalid("self_pointer", announcingAddress, successorAddress);
-        }
-        // announced_at must not be later than updated.
-        if (Rfc3339.epochSeconds(announcedAt) > Rfc3339.epochSeconds(updated)) {
-            throw migrationInvalid("announced_at_after_updated", announcingAddress, successorAddress);
-        }
-        // carrier match (both must be tor-v3; schema already enforced tor-v3).
-        String announcingCarrier = ((JsonValue.Str) origin.get("carrier")).value();
-        String successorCarrier = ((JsonValue.Str) successorOrigin.get("carrier")).value();
-        if (!announcingCarrier.equals(successorCarrier)) {
-            throw migrationInvalid("carrier_mismatch", announcingAddress, successorAddress);
-        }
-        // Announcement-internal: successor address must decode to successor origin_pubkey.
-        byte[] declaredSuccessorPubkey = Base64Url.decode(successorPubkeyB64u, 32);
-        byte[] derived;
-        try {
-            derived = TorV3Address.decodePublicKey(successorAddress);
-        } catch (TorV3Address.InvalidOnionAddress e) {
-            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
-        }
-        if (!Arrays.equals(declaredSuccessorPubkey, derived)) {
-            throw migrationInvalid("successor_key_mismatch", announcingAddress, successorAddress);
-        }
-
-        // Fetch-time successor verification (when the successor manifest is supplied).
-        if (ctx.successorManifest != null) {
-            verifySuccessor(doc, successorOrigin, successorAddress, announcingAddress, ctx);
-        }
+        verifySuccessor(doc, successorOrigin, successorAddress, announcingAddress, ctx);
     }
 
     private static void verifySuccessor(JsonValue.Obj announcing, JsonValue.Obj successorOrigin,

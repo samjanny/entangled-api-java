@@ -1057,6 +1057,58 @@ def negative_vectors(keys) -> list[dict]:
         context={"expected_runtime_pubkey": b64u(rp_pub)},
     ))
 
+    # ---- 163/164: transaction state_updates operation-form schema (AMB-18) --
+    # A state_updates entry whose `op` is unknown, or whose operation form is
+    # missing a required field, is a Stage 5 closed-schema rejection. Per the
+    # §07 state-update failure taxonomy and §11, an unknown `op` is a closed-enum
+    # violation reported as E_SCHEMA_ENUM_VIOLATION, and a missing
+    # operation-form field is reported as E_SCHEMA_REQUIRED_FIELD. The dedicated
+    # E_STATE_OP code is reserved for the later state-operation processing phase
+    # (applying a set/delete against the store), not the Stage 5 schema check.
+    # As in 148/149 the state_updates array is validated standalone at Stage 5
+    # (no manifest state_policy needed); each vector keeps a single live
+    # violation. Signed by K_runtime.
+    t_state_op_unknown, _ = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "replace",
+            "namespace": "session",
+            "key": "data",
+            "value": "ok",
+            "ttl": 86400,
+        }],
+    )
+    out.append(vec(
+        "163-state-op-unknown",
+        kind="transaction",
+        description="Transaction whose state_updates entry carries op=\"replace\", a value outside the closed v1 operation set {set, delete}. Per the §07 state-update failure taxonomy and §11, an unknown op is a closed-enum violation rejected at Stage 5 as E_SCHEMA_ENUM_VIOLATION, not the dedicated E_STATE_OP (reserved for the later state-operation processing phase). The state_updates array is validated standalone at Stage 5; namespace, key, value, and ttl are otherwise valid, so the unknown op is the only live violation. Signed by K_runtime.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_ENUM_VIOLATION",
+        body_obj=t_state_op_unknown,
+        context={"expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    t_state_op_missing, _ = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "set",
+            "namespace": "session",
+            "key": "data",
+            "value": "ok",
+        }],
+    )
+    out.append(vec(
+        "164-state-op-missing-field",
+        kind="transaction",
+        description="Transaction whose state_updates set operation omits the required ttl field (a set has exactly five fields: op, namespace, key, value, ttl). Per the §07 state-update failure taxonomy and §11, a missing operation-form field is rejected at Stage 5 as E_SCHEMA_REQUIRED_FIELD, not the dedicated E_STATE_OP (reserved for the later state-operation processing phase). The state_updates array is validated standalone at Stage 5; op, namespace, key, and value are otherwise valid, so the absent ttl is the only live violation. Signed by K_runtime.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_SCHEMA_REQUIRED_FIELD",
+        body_obj=t_state_op_missing,
+        context={"expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
     # ---- signature: modified payload, wrong length ----
     m_tamper = dict(m)
     # Modify a non-sig field after signing. The signature no longer matches.
@@ -2646,6 +2698,72 @@ def negative_vectors(keys) -> list[dict]:
         },
     ))
 
+    # ---- 203-migration-self-pointer-precedence (AMB-19) ----
+    #
+    # Pins the pipeline stage of the announcement-internal migration_pointer
+    # self_pointer check. The announcing manifest declares a migration_pointer
+    # whose successor_origin.address equals its own origin.address (a
+    # self_pointer) and is ALSO tampered after signing so its Stage 6 signature
+    # no longer verifies. Two readings placed the self_pointer check at
+    # different stages: Stage 5 (a closed-schema cross-field check on the
+    # announcing manifest, in the class of E_ORIGIN_INVALID) or Stage 9 (with
+    # the rest of migration binding). Under §10 first-failing-stage precedence
+    # the readings report different codes for identical wire bytes: Stage 5
+    # reports E_MIGRATION_INVALID (reason self_pointer) before the Stage 6
+    # signature failure; a Stage 9 reading would report the Stage 6
+    # E_SIG_VERIFICATION first and never reach the self_pointer check. AMB-19
+    # pins Stage 5 (consistent with E_ORIGIN_INVALID, AMB-05), so the expected
+    # diagnostic is E_MIGRATION_INVALID with details.reason="self_pointer".
+    # carrier matches and origin_pubkey decodes from the address, and
+    # announced_at equals (not after) updated, so self_pointer is the only live
+    # migration semantic violation.
+    self_addr = onion_address(op_pub)
+    m_selfptr = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        migration_pointer={
+            "successor_origin": {
+                "carrier": "tor-v3",
+                "address": self_addr,            # equals origin.address
+                "origin_pubkey": b64u(op_pub),   # equals origin.origin_pubkey
+            },
+            "announced_at": "2026-05-07T00:00:00Z",
+        },
+    )
+    # Tamper a non-sig field after signing so the Stage 6 signature no longer
+    # verifies, giving a co-occurring later-stage failure. The Stage 5
+    # self_pointer check must still be the reported diagnostic.
+    m_selfptr["min_refresh_interval"] = m_selfptr["min_refresh_interval"] + 1
+    out.append(vec(
+        "203-migration-self-pointer-precedence",
+        kind="manifest",
+        description=(
+            "Announcement-internal migration_pointer self_pointer "
+            "(successor_origin.address equals origin.address) co-occurring with "
+            "a Stage 6 signature failure (a non-sig field was changed after "
+            "signing). AMB-19 pins the four announcement-internal "
+            "E_MIGRATION_INVALID reasons (self_pointer, carrier_mismatch, "
+            "announced_at_after_updated, successor_key_mismatch) to Stage 5 "
+            "closed-schema validation, the same class as E_ORIGIN_INVALID "
+            "(AMB-05); only chain_cycle is Stage 9. Under §10 "
+            "first-failing-stage precedence the Stage 5 self_pointer is "
+            "reported before the Stage 6 signature failure, so the diagnostic "
+            "is E_MIGRATION_INVALID with details.reason=\"self_pointer\", not "
+            "E_SIG_VERIFICATION. This pins the stage cross-implementation: a "
+            "Stage 9 reading would report E_SIG_VERIFICATION instead."
+        ),
+        spec_refs=["§06", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_MIGRATION_INVALID",
+        diagnostic_details={
+            "reason": "self_pointer",
+            "announcing_origin_address": self_addr,
+            "successor_origin_address": self_addr,
+        },
+        body_obj=m_selfptr,
+        context={"fetched_origin_address": self_addr},
+    ))
+
     return out
 
 
@@ -2719,7 +2837,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.37",
+        "rc_target": "1.0-rc.40",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,
