@@ -1,14 +1,14 @@
 # entangled-api-java
 
 [![CI](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml/badge.svg)](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml)
-[![Conformance](https://img.shields.io/badge/corpus-74%2F74-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
-[![Spec](https://img.shields.io/badge/spec-v1.0--rc.37-blue)](https://github.com/samjanny/entangled)
+[![Conformance](https://img.shields.io/badge/corpus-106%2F106-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
+[![Spec](https://img.shields.io/badge/spec-v1.0--rc.48-blue)](https://github.com/samjanny/entangled)
 [![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
 A Java reference implementation of the **Entangled v1.0** protocol,
 built from the specification at
-[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.37`
+[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.48`
 (its `specs/`, `docs/`, and `corpus/`).
 
 ## Usage
@@ -69,56 +69,49 @@ runnable tests.
 
 ## Status
 
-Passes the full conformance corpus: **74 / 74 vectors** match the recorded
-verdict, diagnostic code, and structured `details` byte-identically.
+Passes the conformance corpus at `v1.0-rc.48` (**108 vectors**): **106 / 106**
+in-scope vectors match the recorded verdict, diagnostic code, and structured
+`details` byte-identically.
 
-> Note on vector count: the corpus at `v1.0-rc.37` contains **74** vectors
-> (`corpus.json` `rc_target: 1.0-rc.37`). This implementation tracks the rc.37
-> corpus, including the rc.30-rc.33 ambiguity-resolution vectors (AMB-13
-> through AMB-17) and the rc.34-rc.37 coverage additions: transaction
-> `request_id` binding, `submit_form` label NFC, the dedicated state-update
-> codes (`E_STATE_VALUE_SIZE` / `E_STATE_TTL`), and carrier link URL host
-> validation.
+> Note on vector count: the corpus at `v1.0-rc.48` contains **108** vectors
+> (`corpus.json` `rc_target: 1.0-rc.48`). Two of them, `210-trust-publisher-key-mismatch`
+> and `211-trust-user-rejected-new-identity`, exercise the Stage 7 trust-state
+> machine, which this implementation does not provide (see Known limitations).
+> They are listed in an explicit out-of-scope set in `ConformanceTest` and
+> reported with a printed count rather than counted as failures, so 106 of the
+> 108 vectors run and all 106 pass.
 
 ## Known limitations
 
-### Content index (`content_root`) not yet validated
+### Stage 7 trust-state machine not implemented
 
-This implementation does **not** yet implement the section 10 content-index
-flow. When a manifest carries `content_root`, a conforming client must fetch
-`/content_index.json` from the same carrier origin, verify its SHA-256 against
-the `content_root` committed in the manifest, and then verify every content
-document's `(seq, hash)` against that index before rendering. This library
-validates `content_root` only for syntax (a `sha-256:` digest in the manifest
-schema) and does not perform the fetch, the hash binding, or the per-document
-`seq` / `hash` checks. The section 11 codes for this flow
-(`E_CONTENT_INDEX_FETCH_FAILED`, `E_CONTENT_INDEX_HASH_MISMATCH`,
-`E_CONTENT_INDEX_INVALID`, `E_CONTENT_SEQ_MISSING`, `E_CONTENT_SEQ_ROLLBACK`,
-`E_CONTENT_SEQ_UNCOMMITTED`, `E_CONTENT_HASH_MISMATCH`) are present in
-`DiagnosticCode` but are not yet reachable.
+This implementation does **not** provide the section 10 Stage 7 trust-state
+machine: first contact, TOFU pinning, external PIP verification, and the
+Changed/mismatch detection that rejects a manifest presenting a different
+`K_publisher.pub` than a retained identity. Because there is no retained
+publisher identity or history persistence here, a manifest signed correctly
+under a different publisher key is not recognized as a trust mismatch. The
+section 11 codes for this flow (`E_TRUST_MISMATCH`, `E_TRUST_USER_REJECTED`,
+`I_TRUST_FIRST_CONTACT`, `I_TRUST_TOFU_PINNED`, `I_TRUST_VERIFIED`) are present
+in `DiagnosticCode` but are not emitted.
 
-**Security implication.** The content index is the defense against a
-`K_runtime`-only attacker: an adversary who has compromised the runtime signing
-key but not the publisher key. Because `content_root` is signed by
-`K_publisher`, it binds the set of valid content documents `(path, seq, hash)`
-under the publisher's signature, which a runtime-key-only attacker cannot forge.
-A client that verifies the index rejects an older signed version of a document
-(`E_CONTENT_SEQ_ROLLBACK`), a forged higher-sequence update
-(`E_CONTENT_SEQ_UNCOMMITTED`), and a substituted body at the committed sequence
-(`E_CONTENT_HASH_MISMATCH`); section 10 treats a manifest that commits to a
-content index but cannot deliver a valid one as a hard security failure,
-"indistinguishable from server compromise". Without this flow, a site that
-declares `content_root` is rendered by this library with content protected only
-by the `K_runtime` signature, so a runtime-key-only attacker could serve
-rolled-back or forged content that a content-index-validating client would
-reject. Sites that do not declare `content_root` are unaffected.
+The conformance corpus exercises this through vectors
+`210-trust-publisher-key-mismatch` and `211-trust-user-rejected-new-identity`;
+both are listed in an explicit out-of-scope set in `ConformanceTest` and
+reported with a printed count rather than counted as failures.
 
-**Recommendation.** If you need content-index enforcement, use the Rust
-reference implementation
-([`samjanny/entangled-api`](https://github.com/samjanny/entangled-api)), which
-implements the full flow, or do not rely on this library to render content from
-sites that declare `content_root` until the feature lands. Tracked as a future
-tranche (see the repository issues).
+**Security implication.** Trust-state resolution is what binds a site to a
+stable publisher identity across visits. Without it, this library verifies that
+a manifest is internally consistent and correctly signed under the
+`K_publisher.pub` it presents, but it does not detect that the presented key
+differs from one a client previously pinned for the same site. An embedding
+client that needs publisher-identity continuity (TOFU pinning, PIP verification,
+mismatch warnings) must implement that layer itself, or use a client that does.
+
+**What is implemented.** The content-index flow (`content_root` hash binding and
+per-document `seq` / `hash` verification) and the policy-relative state check
+(`E_STATE_UNDECLARED`) are implemented and exercised by the corpus. Only the
+Stage 7 trust-state layer remains out of scope.
 
 ## Building and testing
 
@@ -127,7 +120,7 @@ Requires JDK 21 and Maven. The conformance corpus is checked in under
 
 ```sh
 export JAVA_HOME=/path/to/jdk-21
-mvn test                          # all unit tests + the 74-vector conformance suite
+mvn test                          # all unit tests + the 108-vector conformance suite
 mvn test -Dtest=ConformanceTest   # the code-vs-corpus conformance suite only
 ```
 
@@ -173,7 +166,7 @@ src/main/java/org/entangled/
   schema/      closed-schema field/block/document validators (Stage 5)
   pipeline/    the 10-stage validation pipeline and per-stage logic
 src/test/java/org/entangled/
-  ConformanceTest    drives all 74 corpus vectors
+  ConformanceTest    drives all 108 corpus vectors (106 in scope)
   unit tests for the JSON, JCS, crypto, and schema layers
 src/test/resources/corpus/    the spec conformance corpus, verbatim
 ```
