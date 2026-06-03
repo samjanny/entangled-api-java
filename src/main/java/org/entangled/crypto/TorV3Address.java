@@ -17,7 +17,9 @@ import java.util.Arrays;
  * <p>Decoding validates the structure, the version byte, and the checksum, and
  * returns the embedded public key so the caller can compare it to
  * {@code origin.origin_pubkey} (origin binding, section 06; failure maps to
- * {@code E_BIND_ORIGIN}).
+ * {@code E_BIND_ORIGIN}). The inverse direction, {@link #encodePublicKey},
+ * derives the canonical address from an origin public key, which a publisher
+ * needs when building a manifest origin.
  */
 public final class TorV3Address {
 
@@ -68,6 +70,27 @@ public final class TorV3Address {
         return pubkey;
     }
 
+    /**
+     * Derive the canonical Tor v3 onion address from a 32-byte Ed25519 origin
+     * public key. The exact inverse of {@link #decodePublicKey}: compute
+     * {@code CHECKSUM = SHA3-256(".onion checksum" || PUBKEY || 0x03)[:2]},
+     * base32-encode {@code PUBKEY || CHECKSUM || VERSION} in the lowercase RFC
+     * 4648 alphabet, and append {@code .onion}. A publisher building a manifest
+     * origin derives the address this way from its origin key.
+     */
+    public static String encodePublicKey(byte[] pubkey) {
+        if (pubkey.length != 32) {
+            throw new InvalidOnionAddress("origin public key must be 32 bytes, got " + pubkey.length);
+        }
+        byte[] checksum = computeChecksum(pubkey, VERSION);
+        byte[] body = new byte[35];
+        System.arraycopy(pubkey, 0, body, 0, 32);
+        body[32] = checksum[0];
+        body[33] = checksum[1];
+        body[34] = VERSION;
+        return base32Encode(body) + SUFFIX;
+    }
+
     private static byte[] computeChecksum(byte[] pubkey, byte version) {
         byte[] input = new byte[CHECKSUM_PREFIX.length + pubkey.length + 1];
         int pos = 0;
@@ -109,5 +132,24 @@ public final class TorV3Address {
             }
         }
         return out;
+    }
+
+    /** Lowercase RFC 4648 base32 encode (no padding); 35 bytes -> 56 chars. */
+    private static String base32Encode(byte[] data) {
+        StringBuilder out = new StringBuilder(data.length * 8 / 5);
+        int buffer = 0;
+        int bits = 0;
+        for (byte b : data) {
+            buffer = (buffer << 8) | (b & 0xFF);
+            bits += 8;
+            while (bits >= 5) {
+                bits -= 5;
+                out.append(BASE32_ALPHABET.charAt((buffer >> bits) & 0x1F));
+            }
+        }
+        if (bits > 0) {
+            out.append(BASE32_ALPHABET.charAt((buffer << (5 - bits)) & 0x1F));
+        }
+        return out.toString();
     }
 }
