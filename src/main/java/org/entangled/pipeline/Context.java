@@ -60,6 +60,21 @@ public final class Context {
     /** Announced successor origin address for a migration scenario. */
     public String successorOriginAddress;
 
+    /**
+     * Exact bytes of the {@code /content_index.json} served from the manifest's
+     * carrier origin (Stage 9b content-index verification). Present for content
+     * vectors at an indexed path and for manifest vectors that declare a
+     * content_root.
+     */
+    public byte[] contentIndex;
+
+    /**
+     * The manifest's declared {@code content_root} (the SHA-256 of the served
+     * index bytes), supplied for content vectors so Stage 9b can verify the
+     * index without re-loading the manifest.
+     */
+    public String contentRoot;
+
     public Context(long nowEpoch) {
         this.nowEpoch = nowEpoch;
     }
