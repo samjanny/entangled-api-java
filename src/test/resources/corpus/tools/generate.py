@@ -54,12 +54,14 @@ RUNTIME_SEED = b"ENTANGLED-v1.0-runtime-test0001\x00"
 ORIGIN_SEED = b"ENTANGLED-v1.0-origin-test00001\x00"
 RUNTIME_SEED_2 = b"ENTANGLED-v1.0-runtime-test0002\x00"
 ORIGIN_SEED_2 = b"ENTANGLED-v1.0-origin-test00002\x00"
+PUBLISHER_SEED_2 = b"ENTANGLED-v1.0-publisher-test02\x00"
 
 assert len(PUBLISHER_SEED) == 32
 assert len(RUNTIME_SEED) == 32
 assert len(ORIGIN_SEED) == 32
 assert len(RUNTIME_SEED_2) == 32
 assert len(ORIGIN_SEED_2) == 32
+assert len(PUBLISHER_SEED_2) == 32
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +615,213 @@ def positive_vectors(keys) -> list[dict]:
         },
     ))
 
+    # =====================================================================
+    # Richer accept baselines and exact-boundary accepts. The existing
+    # accept vectors (001-007) are minimal; these exercise fuller documents
+    # and pin each inclusive limit at its exact boundary value, paired with
+    # the existing one-past-the-limit reject vectors.
+    # =====================================================================
+
+    # 010: a full manifest combining a populated state_policy, origin.not_after
+    # within the 5-year ceiling, and a populated navigation array. The minimal
+    # accept (001) has none of these together.
+    m_full = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        not_after="2027-05-07T00:00:00Z",
+        state_policy=[
+            {
+                "namespace": "session",
+                "key": "auth",
+                "mode": "request",
+                "max_size": 512,
+                "max_lifetime": 86400,
+                "purpose": "Authenticate submit requests after login.",
+            },
+        ],
+    )
+    m_full["navigation"] = [
+        {"label": "Home", "path": "/"},
+        {"label": "Articles", "path": "/articles"},
+    ]
+    del m_full["sig"]
+    m_full["sig"] = sign(pp, CTX_MANIFEST, m_full)
+    out.append(vec(
+        "010-manifest-valid-full",
+        kind="manifest",
+        description="Valid manifest combining a populated state_policy entry, an origin.not_after one year ahead (within the 5-year ceiling), and a populated navigation array. Exercises a fuller accept than the minimal 001. Signed by K_publisher.",
+        spec_refs=["§02", "§06", "§07"],
+        verdict="accept",
+        body_obj=m_full,
+        context={"fetched_origin_address": m_full["origin"]["address"]},
+    ))
+
+    # 011: a valid transaction carrying both a set and a delete state update,
+    # each against a (namespace, key) declared by manifest 002's state_policy.
+    # The accept counterpart to the undeclared-reference rejects (220, 221).
+    t_state_ok, sb_state_ok = make_transaction(
+        runtime_priv=rp,
+        state_updates=[
+            {"op": "set", "namespace": "session", "key": "auth",
+             "value": "token-value", "ttl": 86400},
+            {"op": "delete", "namespace": "ui", "key": "lang"},
+        ],
+    )
+    out.append(vec(
+        "011-transaction-valid-state-updates",
+        kind="transaction",
+        description="Valid transaction carrying a set on (session, auth) and a delete on (ui, lang), both declared by the manifest 002 state_policy. The set value and ttl are within bounds. Accept counterpart to the undeclared-reference rejects (220, 221). Signed by K_runtime; context.previously_verified points at 002 to resolve the declared set.",
+        spec_refs=["§07", "§09"],
+        verdict="accept",
+        body_obj=t_state_ok,
+        context={
+            "submit_path": t_state_ok["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/011-transaction-valid-state-updates/submit_body.json",
+            "previously_verified": "vectors/002-manifest-valid-state-policy/input.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_state_ok, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
+    ))
+
+    # 012: a migration that is adopted successfully. The announcing manifest
+    # points at a successor whose own manifest is valid at clock_now (canary
+    # fresh, origin not expired) and binds correctly to the successor address.
+    # The accept counterpart to the migration rejects (200-204).
+    op_pub_2_ok = keys["origin_pub_2"]
+    successor_addr_ok = onion_address(op_pub_2_ok)
+    successor_ok = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub_2_ok, runtime_pub=rp_pub,
+        not_after="2027-05-07T00:00:00Z",
+    )
+    successor_ok_bytes = json.dumps(
+        successor_ok, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    announcing_ok = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        migration_pointer={
+            "successor_origin": {
+                "carrier": "tor-v3",
+                "address": successor_addr_ok,
+                "origin_pubkey": b64u(op_pub_2_ok),
+            },
+            "announced_at": "2026-05-07T00:00:00Z",
+        },
+    )
+    out.append(vec(
+        "012-migration-successor-adopted",
+        kind="manifest",
+        description="Migration adopted successfully. The announcing manifest at the original origin carries a migration_pointer to a successor origin; the successor manifest (in extra_files) is signed by the same K_publisher, binds to the successor address by the Tor v3 derivation, and is itself valid at clock_now (canary fresh, origin not expired). The migration adoption outcome is accept. Accept counterpart to the migration rejects (200-204).",
+        spec_refs=["§06", "§10"],
+        verdict="accept",
+        body_obj=announcing_ok,
+        context={
+            "fetched_origin_address": announcing_ok["origin"]["address"],
+            "successor_origin_address": successor_addr_ok,
+            "successor_manifest_path": "vectors/012-migration-successor-adopted/successor_manifest.json",
+        },
+        extra_files={"successor_manifest.json": successor_ok_bytes},
+    ))
+
+    # 013-016: exact-boundary accepts. Each inclusive limit is accepted at its
+    # exact boundary value; the paired reject vector sits one step past it.
+
+    # 013: state set ttl at exactly 7776000 (the inclusive upper bound, §07:279).
+    # Pairs with 149 (ttl 7776001, reject).
+    t_ttl_max, sb_ttl_max = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{"op": "set", "namespace": "session", "key": "data",
+                        "value": "ok", "ttl": 7776000}],
+    )
+    out.append(vec(
+        "013-state-ttl-max-boundary",
+        kind="transaction",
+        description="Transaction whose state set ttl is exactly 7776000 seconds, the inclusive upper bound (§07:279). Accept boundary paired with 149 (ttl 7776001, reject). Signed by K_runtime.",
+        spec_refs=["§07"],
+        verdict="accept",
+        body_obj=t_ttl_max,
+        context={
+            "submit_path": t_ttl_max["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/013-state-ttl-max-boundary/submit_body.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_ttl_max, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
+    ))
+
+    # 014: state set value at exactly 4096 UTF-8 bytes (the inclusive ceiling,
+    # §07:264). Pairs with 148 (value 4097, reject).
+    t_value_max, sb_value_max = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{"op": "set", "namespace": "session", "key": "data",
+                        "value": "x" * 4096, "ttl": 86400}],
+    )
+    out.append(vec(
+        "014-state-value-max-boundary",
+        kind="transaction",
+        description="Transaction whose state set value is exactly 4096 raw UTF-8 bytes, the inclusive protocol ceiling (§07:264). Accept boundary paired with 148 (value 4097, reject). Signed by K_runtime.",
+        spec_refs=["§07"],
+        verdict="accept",
+        body_obj=t_value_max,
+        context={
+            "submit_path": t_value_max["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/014-state-value-max-boundary/submit_body.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_value_max, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
+    ))
+
+    # 015: origin.not_after at exactly the 5-year ceiling. Per §06:171 the
+    # ceiling is 157680000 seconds (exactly 1825 days) after canary.issued_at;
+    # from issued_at 2026-05-07T00:00:00Z that is 2031-05-06T00:00:00Z (the
+    # leap day 2028-02-29 in the window shifts the calendar date back one day
+    # from a naive five-calendar-year addition). Pairs with 177 (beyond 5y,
+    # reject).
+    m_not_after_max = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        not_after="2031-05-06T00:00:00Z",
+    )
+    out.append(vec(
+        "015-origin-not-after-max-boundary",
+        kind="manifest",
+        description="Manifest whose origin.not_after is exactly 157680000 seconds (the 5-year ceiling, §06:171) after canary.issued_at 2026-05-07T00:00:00Z, which is 2031-05-06T00:00:00Z. The bound is inclusive, so the exact ceiling is accepted. Accept boundary paired with 177 (one past the ceiling, reject). Signed by K_publisher.",
+        spec_refs=["§06"],
+        verdict="accept",
+        body_obj=m_not_after_max,
+        context={"fetched_origin_address": m_not_after_max["origin"]["address"]},
+    ))
+
+    # 016: canary interval at exactly the 7-day minimum (604800 seconds,
+    # §08:86). issued_at 2026-05-07, next_expected 2026-05-14. Pairs with 182
+    # (6-day interval, reject).
+    m_interval_min = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+        next_expected="2026-05-14T00:00:00Z",
+    )
+    out.append(vec(
+        "016-canary-interval-min-boundary",
+        kind="manifest",
+        description="Manifest whose canary interval (next_expected - issued_at) is exactly 7 days (604800 seconds), the inclusive minimum (§08:86): issued_at 2026-05-07, next_expected 2026-05-14. Accept boundary paired with 182 (6-day interval, reject). Signed by K_publisher.",
+        spec_refs=["§08"],
+        verdict="accept",
+        body_obj=m_interval_min,
+        context={"fetched_origin_address": m_interval_min["origin"]["address"]},
+    ))
+
     return out
 
 
@@ -1097,6 +1306,74 @@ def negative_vectors(keys) -> list[dict]:
         diagnostic="E_STATE_TTL",
         body_obj=t_state_ttl,
         context={"expected_runtime_pubkey": b64u(rp_pub)},
+    ))
+
+    # ---- 220/221: state update references an undeclared (namespace, key) ----
+    # Unlike 148/149/163/164, which are standalone Stage 5 checks on the
+    # state_updates array, E_STATE_UNDECLARED (§07:252, §11:287) needs the
+    # manifest's state_policy to resolve which (namespace, key) pairs are
+    # declared. The transactions below are otherwise valid and signed by
+    # K_runtime; context.previously_verified points at 002, whose state_policy
+    # declares exactly (session, auth) and (ui, lang). The referenced pairs are
+    # outside that set, so the only live violation is the undeclared reference.
+    t_state_undeclared_set, sb_undeclared_set = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "set",
+            "namespace": "session",
+            "key": "token",
+            "value": "ok",
+            "ttl": 86400,
+        }],
+    )
+    out.append(vec(
+        "220-state-undeclared-set",
+        kind="transaction",
+        description="Transaction whose state_updates set operation references (session, token). The namespace session is declared by the manifest's state_policy (002) but the key token is not, so the pair is undeclared. Per §07:252 a state update referencing a (namespace, key) not in the current state_policy is rejected with E_STATE_UNDECLARED (§11:287). The set is otherwise well-formed (value and ttl in range) and signed by K_runtime, so the undeclared reference is the only live violation. Resolving the declared set needs the manifest, so context.previously_verified points at 002.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_STATE_UNDECLARED",
+        body_obj=t_state_undeclared_set,
+        context={
+            "submit_path": t_state_undeclared_set["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/220-state-undeclared-set/submit_body.json",
+            "previously_verified": "vectors/002-manifest-valid-state-policy/input.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_undeclared_set, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
+    ))
+
+    t_state_undeclared_delete, sb_undeclared_delete = make_transaction(
+        runtime_priv=rp,
+        state_updates=[{
+            "op": "delete",
+            "namespace": "analytics",
+            "key": "visits",
+        }],
+    )
+    out.append(vec(
+        "221-state-undeclared-delete",
+        kind="transaction",
+        description="Transaction whose state_updates delete operation references (analytics, visits), a pair the manifest's state_policy (002) does not declare at all. Per §07:323 a delete referencing an undeclared (namespace, key) is rejected with E_STATE_UNDECLARED (§11:287), the same dedicated code as the set form. The delete is otherwise well-formed (exactly op, namespace, key) and signed by K_runtime, so the undeclared reference is the only live violation. context.previously_verified points at 002 to resolve the declared set.",
+        spec_refs=["§07", "§11"],
+        verdict="reject",
+        diagnostic="E_STATE_UNDECLARED",
+        body_obj=t_state_undeclared_delete,
+        context={
+            "submit_path": t_state_undeclared_delete["in_response_to"],
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "submit_body_path": "vectors/221-state-undeclared-delete/submit_body.json",
+            "previously_verified": "vectors/002-manifest-valid-state-policy/input.json",
+        },
+        extra_files={
+            "submit_body.json": json.dumps(
+                sb_undeclared_delete, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8"),
+        },
     ))
 
     # ---- 163/164: transaction state_updates operation-form schema (AMB-18) --
@@ -3134,6 +3411,280 @@ def negative_vectors(keys) -> list[dict]:
         },
     ))
 
+    # -----------------------------------------------------------------------
+    # Stage 7: publisher trust-state resolution (§10, §11).
+    #
+    # Trust state is keyed by the site or publisher profile. A client that
+    # has verified and retained K_publisher.pub for a site reaches the
+    # Changed/mismatch state when a later manifest for that same site presents
+    # a different K_publisher.pub. The mismatch is detected as a Stage 6
+    # pre-check and takes precedence over signature verification (§10): the
+    # manifest below is signed correctly under the SECOND publisher key, so its
+    # signature verifies, yet the identity mismatch against the retained first
+    # publisher is the live failure. Vectors 001 (retained) and these share the
+    # same origin address, modelling one site whose pinned identity changed.
+    pp2 = keys["publisher_priv_2"]
+    pp2_pub = keys["publisher_pub_2"]
+
+    m_trust_mismatch = make_manifest(
+        publisher_priv=pp2, publisher_pub=pp2_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    out.append(vec(
+        "210-trust-publisher-key-mismatch",
+        kind="manifest",
+        description="Manifest presenting a different K_publisher.pub than the identity the client previously verified and retained for this site (001). The manifest is signed correctly under the second publisher key, so its signature verifies, but the identity mismatch is detected as a Stage 6 pre-check and takes precedence over signature verification. Rejected with E_TRUST_MISMATCH.",
+        spec_refs=["§10", "§11"],
+        verdict="reject",
+        diagnostic="E_TRUST_MISMATCH",
+        body_obj=m_trust_mismatch,
+        context={
+            "fetched_origin_address": m_trust_mismatch["origin"]["address"],
+            "previously_verified": "vectors/001-manifest-valid-minimal/input.json",
+            "retained_publisher_pubkey": b64u(pp_pub),
+        },
+    ))
+
+    out.append(vec(
+        "211-trust-user-rejected-new-identity",
+        kind="manifest",
+        description="Same identity mismatch as 210: a manifest presents a different K_publisher.pub than the retained identity for this site (001). During mismatch resolution the user explicitly rejects the newly presented identity rather than adopting it. Rejected with E_TRUST_USER_REJECTED.",
+        spec_refs=["§10", "§11"],
+        verdict="reject",
+        diagnostic="E_TRUST_USER_REJECTED",
+        body_obj=m_trust_mismatch,
+        context={
+            "fetched_origin_address": m_trust_mismatch["origin"]["address"],
+            "previously_verified": "vectors/001-manifest-valid-minimal/input.json",
+            "retained_publisher_pubkey": b64u(pp_pub),
+            "user_decision": "reject_new_identity",
+        },
+    ))
+
+    # First contact: a valid manifest for a publisher the client has never
+    # retained. All stages pass; Stage 7 records a first-contact observation
+    # and emits the info code I_TRUST_FIRST_CONTACT on an accept verdict. The
+    # manifest is the second publisher's, fetched at the second origin, so no
+    # prior record exists for this site or publisher profile.
+    m_first_contact = make_manifest(
+        publisher_priv=pp2, publisher_pub=pp2_pub,
+        origin_pub=op_pub_2, runtime_pub=rp_pub,
+    )
+    out.append(vec(
+        "212-trust-first-contact",
+        kind="manifest",
+        description="Valid manifest for a publisher identity the client has no prior retained record of. All stages pass; Stage 7 records a first-contact observation and emits the info code I_TRUST_FIRST_CONTACT alongside an accept verdict.",
+        spec_refs=["§10", "§11"],
+        verdict="accept",
+        diagnostic="I_TRUST_FIRST_CONTACT",
+        body_obj=m_first_contact,
+        context={
+            "fetched_origin_address": m_first_contact["origin"]["address"],
+        },
+    ))
+
+    out.append(vec(
+        "213-trust-tofu-pinned",
+        kind="manifest",
+        description="Valid manifest whose first-contact observation the user explicitly affirms, transitioning the publisher identity to TOFU pinned. Accept verdict with the info code I_TRUST_TOFU_PINNED.",
+        spec_refs=["§10", "§11"],
+        verdict="accept",
+        diagnostic="I_TRUST_TOFU_PINNED",
+        body_obj=m_first_contact,
+        context={
+            "fetched_origin_address": m_first_contact["origin"]["address"],
+            "user_decision": "pin_identity",
+        },
+    ))
+
+    out.append(vec(
+        "214-trust-externally-verified",
+        kind="manifest",
+        description="Valid manifest whose K_publisher.pub the user confirms against an out-of-band PIP reference, transitioning the publisher identity to Externally verified. Accept verdict with the info code I_TRUST_VERIFIED.",
+        spec_refs=["§10", "§11"],
+        verdict="accept",
+        diagnostic="I_TRUST_VERIFIED",
+        body_obj=m_first_contact,
+        context={
+            "fetched_origin_address": m_first_contact["origin"]["address"],
+            "user_decision": "verify_pip",
+        },
+    ))
+
+    # -----------------------------------------------------------------------
+    # Stage 9: content index and content sequencing (§02, §06, §09, §10, §11).
+    #
+    # A manifest may carry content_root, the SHA-256 of the exact response
+    # bytes of /content_index.json (§06:437). The index is a closed-structure
+    # JSON document {"entries": {"/path": {"seq": N, "hash": "sha-256:..."}}}
+    # (§02:221-234); it is NOT a signed Entangled document. At Stage 9 the
+    # client fetches and hash-checks the index against content_root, then
+    # structurally validates it, then for the content document being rendered
+    # compares its seq against the index entry (§10:608-620): seq absent ->
+    # E_CONTENT_SEQ_MISSING, seq < idx -> rollback, seq > idx -> uncommitted,
+    # seq == idx with body hash != idx hash -> E_CONTENT_HASH_MISMATCH.
+    #
+    # The content document is the main input; the index travels in extra_files
+    # and content_root is recorded in context (no separate manifest file is
+    # needed to express this check). E_CONTENT_INDEX_FETCH_FAILED is the one
+    # content code left deferred: it is a transport failure and shares the
+    # deferred Stage 1 transport schema extension.
+    indexed_path = "/articles/first-post"
+
+    def content_index_bytes(entries: dict) -> bytes:
+        # Serialize the index as canonical JCS so content_root is a stable
+        # function of the entry set. The client hashes the exact response
+        # bytes; using JCS here fixes those bytes deterministically.
+        return jcs({"entries": entries})
+
+    # ---- 230: content_root does not match the served index bytes ----
+    # The index is structurally valid; only the manifest's content_root digest
+    # is wrong, so the live failure is the index hash mismatch, not _INVALID.
+    idx_230 = content_index_bytes({
+        indexed_path: {"seq": 5, "hash": sha256_b64u(b"first-post-body-v5")},
+    })
+    m_230 = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    # Declare a content_root that is the digest of different bytes, so it does
+    # not match the served index. Re-sign so the only live failure is Stage 9.
+    m_230["content_root"] = sha256_b64u(b"a-different-content-index")
+    del m_230["sig"]
+    m_230["sig"] = sign(pp, CTX_MANIFEST, m_230)
+    out.append(vec(
+        "230-content-index-hash-mismatch",
+        kind="manifest",
+        description="Manifest declaring a content_root whose SHA-256 does not match the exact bytes of the served content_index.json (provided in extra_files). The index is structurally valid, so the live failure is E_CONTENT_INDEX_HASH_MISMATCH (§10:598, §11:244), not E_CONTENT_INDEX_INVALID. Signed correctly by K_publisher; per §10:600 an index hash failure blocks rendering of all content under this manifest.",
+        spec_refs=["§06", "§09", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_INDEX_HASH_MISMATCH",
+        body_obj=m_230,
+        context={
+            "fetched_origin_address": m_230["origin"]["address"],
+            "content_index_path": "vectors/230-content-index-hash-mismatch/content_index.json",
+        },
+        extra_files={"content_index.json": idx_230},
+    ))
+
+    # ---- 231: content_root matches, but the index is structurally invalid ----
+    # An entry carries an extra field beyond the closed {seq, hash} schema. The
+    # content_root is the true digest of these bytes so the hash check passes
+    # and the live failure is the structural one.
+    idx_231 = jcs({"entries": {
+        indexed_path: {"seq": 5, "hash": sha256_b64u(b"first-post-body-v5"),
+                       "extra": "not-permitted"},
+    }})
+    m_231 = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    m_231["content_root"] = sha256_b64u(idx_231)
+    del m_231["sig"]
+    m_231["sig"] = sign(pp, CTX_MANIFEST, m_231)
+    out.append(vec(
+        "231-content-index-invalid",
+        kind="manifest",
+        description="Manifest whose content_root matches the served content_index.json bytes, but the index fails structural validation: an entry carries a field beyond the closed {seq, hash} entry schema (§02:229-234). The hash check passes, so the live failure is E_CONTENT_INDEX_INVALID (§10:598, §11:245), not E_CONTENT_INDEX_HASH_MISMATCH. Signed correctly by K_publisher.",
+        spec_refs=["§02", "§09", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_INDEX_INVALID",
+        body_obj=m_231,
+        context={
+            "fetched_origin_address": m_231["origin"]["address"],
+            "content_index_path": "vectors/231-content-index-invalid/content_index.json",
+        },
+        extra_files={"content_index.json": idx_231},
+    ))
+
+    # ---- 232-235: per-document seq checks against a verified index ----
+    # The index commits indexed_path at seq 5 with the digest of the accepted
+    # body bytes. Each content document below is signed by K_runtime and is
+    # well-formed; the live failure is the seq/hash relationship to the index.
+    accepted_body_marker = b"first-post-body-v5"
+    idx_seq = 5
+    idx_hash = sha256_b64u(accepted_body_marker)
+    seq_index_bytes = content_index_bytes({
+        indexed_path: {"seq": idx_seq, "hash": idx_hash},
+    })
+    seq_content_root = sha256_b64u(seq_index_bytes)
+
+    def seq_content(*, seq=None):
+        payload = {
+            "spec_version": "1.0",
+            "kind": "content",
+            "path": indexed_path,
+            "meta": {"title": "First post", "published_at": "2026-05-07T00:00:00Z"},
+            "blocks": [
+                {
+                    "kind": "paragraph",
+                    "content": [
+                        {"kind": "text", "value": "Hello, world.", "marks": []},
+                    ],
+                }
+            ],
+        }
+        if seq is not None:
+            payload["seq"] = seq
+        payload["sig"] = sign(rp, CTX_CONTENT, payload)
+        return payload
+
+    def seq_context(vid):
+        return {
+            "fetched_path": indexed_path,
+            "expected_runtime_pubkey": b64u(rp_pub),
+            "content_root": seq_content_root,
+            "content_index_path": f"vectors/{vid}/content_index.json",
+        }
+
+    out.append(vec(
+        "232-content-seq-missing",
+        kind="content",
+        description="Content document at an indexed path that omits the seq field. The verified content index has an entry for this path, so per §02:194 and §10:616 seq is required; its absence is E_CONTENT_SEQ_MISSING. The document is otherwise well-formed and signed by K_runtime.",
+        spec_refs=["§02", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_SEQ_MISSING",
+        body_obj=seq_content(seq=None),
+        context=seq_context("232-content-seq-missing"),
+        extra_files={"content_index.json": seq_index_bytes},
+    ))
+
+    out.append(vec(
+        "233-content-seq-rollback",
+        kind="content",
+        description="Content document whose seq (2) is strictly less than the seq (5) committed for this path in the verified content index. Per §10:617 a lower seq is E_CONTENT_SEQ_ROLLBACK, which blocks a K_runtime-only attacker from serving an older signed version. Signed by K_runtime.",
+        spec_refs=["§02", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_SEQ_ROLLBACK",
+        body_obj=seq_content(seq=2),
+        context=seq_context("233-content-seq-rollback"),
+        extra_files={"content_index.json": seq_index_bytes},
+    ))
+
+    out.append(vec(
+        "234-content-seq-uncommitted",
+        kind="content",
+        description="Content document whose seq (9) is strictly greater than the seq (5) committed for this path in the verified content index. Per §10:618 a higher seq is E_CONTENT_SEQ_UNCOMMITTED, which blocks a K_runtime-only attacker from injecting a forged update at a higher sequence number than the publisher committed. Signed by K_runtime.",
+        spec_refs=["§02", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_SEQ_UNCOMMITTED",
+        body_obj=seq_content(seq=9),
+        context=seq_context("234-content-seq-uncommitted"),
+        extra_files={"content_index.json": seq_index_bytes},
+    ))
+
+    out.append(vec(
+        "235-content-hash-mismatch",
+        kind="content",
+        description="Content document whose seq (5) equals the seq committed for this path in the verified content index, but whose response-body SHA-256 does not match the hash the index commits for that seq. Per §10:619 a body that does not match the committed digest at the committed seq is E_CONTENT_HASH_MISMATCH. The index hash is the digest of different body bytes than this document, so the seq matches while the hash does not. Signed by K_runtime.",
+        spec_refs=["§02", "§10", "§11"],
+        verdict="reject",
+        diagnostic="E_CONTENT_HASH_MISMATCH",
+        body_obj=seq_content(seq=5),
+        context=seq_context("235-content-hash-mismatch"),
+        extra_files={"content_index.json": seq_index_bytes},
+    ))
+
     return out
 
 
@@ -3151,6 +3702,7 @@ def main() -> int:
     origin_priv, origin_pub = keypair(ORIGIN_SEED)
     runtime_priv_2, runtime_pub_2 = keypair(RUNTIME_SEED_2)
     origin_priv_2, origin_pub_2 = keypair(ORIGIN_SEED_2)
+    publisher_priv_2, publisher_pub_2 = keypair(PUBLISHER_SEED_2)
 
     keys = {
         "publisher_priv": publisher_priv,
@@ -3163,6 +3715,8 @@ def main() -> int:
         "runtime_pub_2": runtime_pub_2,
         "origin_priv_2": origin_priv_2,
         "origin_pub_2": origin_pub_2,
+        "publisher_priv_2": publisher_priv_2,
+        "publisher_pub_2": publisher_pub_2,
     }
 
     wordlist = load_bip39_wordlist()
@@ -3172,6 +3726,16 @@ def main() -> int:
     }
     if wordlist is not None:
         publisher_entry["pip"] = compute_pip(publisher_pub, wordlist)
+
+    # Second publisher identity. Used by the Stage 7 trust-state vectors to
+    # model a manifest presenting a different K_publisher.pub than the one a
+    # client previously verified and retained for the site or publisher profile.
+    publisher_2_entry = {
+        "seed_hex": PUBLISHER_SEED_2.hex(),
+        "pub_b64u": b64u(publisher_pub_2),
+    }
+    if wordlist is not None:
+        publisher_2_entry["pip"] = compute_pip(publisher_pub_2, wordlist)
 
     keys_doc = {
         "_comment": "Test fixtures only. NEVER use these for any real deployment.",
@@ -3194,6 +3758,7 @@ def main() -> int:
             "pub_b64u": b64u(origin_pub_2),
             "tor_v3_address": onion_address(origin_pub_2),
         },
+        "publisher_2": publisher_2_entry,
     }
     (ROOT / "keys.json").write_bytes(
         (json.dumps(keys_doc, indent=2, ensure_ascii=False) + "\n")
@@ -3207,7 +3772,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.47",
+        "rc_target": "1.0-rc.48",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,

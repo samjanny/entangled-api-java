@@ -454,6 +454,38 @@ public final class DocumentSchema {
         }
     }
 
+    /**
+     * Cross-check a transaction's {@code state_updates} against the
+     * {@code state_policy} declared by the manifest under which the transaction
+     * is verified. Every {@code (namespace, key)} a set or delete operation
+     * references must be declared in the policy; an undeclared reference is
+     * {@code E_STATE_UNDECLARED} (section 07:252/323, section 11:287).
+     *
+     * <p>The standalone {@link #validateStateUpdates} checks the operation form
+     * and the absolute hard ranges at Stage 5 without a manifest; this check is
+     * the policy-relative half and runs only when the manifest policy is
+     * available. {@code statePolicy} is the manifest's {@code state_policy}
+     * array (an empty array declares no keys, so any reference is undeclared).
+     */
+    public static void checkStateUpdatesDeclared(JsonValue.Obj transaction, JsonValue.Arr statePolicy) {
+        JsonValue updatesValue = transaction.get("state_updates");
+        if (!(updatesValue instanceof JsonValue.Arr updates) || updates.elements().isEmpty()) {
+            return;
+        }
+        Set<String> declared = new java.util.HashSet<>();
+        for (JsonValue e : statePolicy.elements()) {
+            JsonValue.Obj entry = Fields.obj(e);
+            declared.add(Fields.str(entry.get("namespace")) + " " + Fields.str(entry.get("key")));
+        }
+        for (JsonValue u : updates.elements()) {
+            JsonValue.Obj op = Fields.obj(u);
+            String composite = Fields.str(op.get("namespace")) + " " + Fields.str(op.get("key"));
+            if (!declared.contains(composite)) {
+                throw new RejectException(DiagnosticCode.E_STATE_UNDECLARED);
+            }
+        }
+    }
+
     // --- shared ---
 
     private static void onionAddress(String address) {

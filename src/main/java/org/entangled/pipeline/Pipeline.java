@@ -101,6 +101,10 @@ public final class Pipeline {
 
         // Stage 9: origin binding, not_after expiry, migration.
         Stage9Binding.manifest(doc, ctx);
+
+        // Stage 9b: when the manifest declares content_root, verify the served
+        // content index against it and structurally validate the index.
+        Stage9ContentIndex.verifyManifestIndex(doc, ctx.contentIndex);
     }
 
     // --- Content ---
@@ -116,6 +120,11 @@ public final class Pipeline {
 
         // Stage 9: path binding (byte-exact against the fetched path).
         Stage9Binding.contentPath(doc, ctx);
+
+        // Stage 9b: when a verified content index applies (content_root in
+        // context), compare this document's seq and body hash against the
+        // committed entry for its path.
+        Stage9ContentIndex.verifyContentSeq(doc, body, ctx.contentRoot, ctx.contentIndex);
     }
 
     // --- Transaction ---
@@ -126,8 +135,36 @@ public final class Pipeline {
         byte[] runtimePub = runtimeKeyOrInvalid();
         verifyOrThrow(runtimePub, doc, CTX_TRANSACTION);
 
+        // Stage 5 (policy-aware): when the manifest under which this transaction
+        // is verified is available, every state_updates (namespace, key) must be
+        // declared in its state_policy (E_STATE_UNDECLARED). The standalone Stage 5
+        // form/range checks above do not need the manifest; this half does.
+        JsonValue.Arr statePolicy = pinnedStatePolicy();
+        if (statePolicy != null) {
+            DocumentSchema.checkStateUpdatesDeclared(doc, statePolicy);
+        }
+
         // Stage 9: in_response_to / request_id / request_hash binding.
         Stage9Binding.transaction(doc, ctx);
+    }
+
+    /**
+     * The {@code state_policy} of the manifest under which the current document
+     * is verified, taken from the most recent entry in the seeded publisher
+     * history, or null when no manifest is available. The history bytes were
+     * already verified when seeded; here we only re-read the declared policy.
+     */
+    private JsonValue.Arr pinnedStatePolicy() {
+        if (ctx.publisherHistory.isEmpty()) {
+            return null;
+        }
+        byte[] manifestBytes = ctx.publisherHistory.get(ctx.publisherHistory.size() - 1);
+        JsonValue parsed = JsonParser.parse(new String(manifestBytes, StandardCharsets.UTF_8));
+        if (parsed instanceof JsonValue.Obj manifest
+                && manifest.get("state_policy") instanceof JsonValue.Arr policy) {
+            return policy;
+        }
+        return null;
     }
 
     private byte[] runtimeKeyOrInvalid() {
