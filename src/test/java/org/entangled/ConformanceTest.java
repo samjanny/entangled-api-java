@@ -35,16 +35,21 @@ class ConformanceTest {
     private static final java.nio.file.Path ROOT = CorpusFiles.ROOT;
 
     /**
-     * Vectors that exercise functionality this implementation does not yet
-     * provide. The Stage 7 trust-state machine is not implemented, so a manifest
-     * that presents a different publisher key than a retained identity is not
-     * recognized as a trust mismatch. These vectors are skipped with a printed
-     * count rather than counted as failures, so the gap stays visible and never
-     * silently passes. Remove an id here when the capability lands.
+     * Vectors that exercise functionality this library documents as out of scope
+     * (the section 10 Stage 7 trust-state machine). Like the Rust reference
+     * crate, this library is a verifier: it covers the per-document pipeline
+     * (Stages 2 through 9) but deliberately leaves trust-state resolution - TOFU
+     * pinning, externally-verified PIP, retained-identity mismatch detection, and
+     * the publisher-history persistence those require - to an embedding client
+     * layer. These vectors are reported as skipped with a printed count rather
+     * than counted as failures, so the scope boundary is visible and never
+     * silently passes. Each entry is {@code id -> reason}.
      */
-    private static final java.util.Set<String> OUT_OF_SCOPE = java.util.Set.of(
+    private static final java.util.Map<String, String> OUT_OF_SCOPE = java.util.Map.of(
             "210-trust-publisher-key-mismatch",
-            "211-trust-user-rejected-new-identity");
+            "Stage 7 trust-state machine is out of scope for this library",
+            "211-trust-user-rejected-new-identity",
+            "Stage 7 trust-state machine is out of scope for this library");
 
     @TestFactory
     List<DynamicTest> corpusVectors() {
@@ -63,15 +68,17 @@ class ConformanceTest {
         for (JsonValue vEntry : vectors) {
             JsonValue.Obj vector = (JsonValue.Obj) vEntry;
             String id = str(vector.get("id"));
-            if (OUT_OF_SCOPE.contains(id)) {
-                skipped.add(id);
+            String outOfScopeReason = OUT_OF_SCOPE.get(id);
+            if (outOfScopeReason != null) {
+                skipped.add("[" + id + "] " + outOfScopeReason);
                 continue;
             }
             tests.add(DynamicTest.dynamicTest(id, () -> runVector(vector, clockNow)));
         }
         if (!skipped.isEmpty()) {
             System.out.println(skipped.size() + " of " + vectors.size()
-                    + " vectors skipped as out of scope (Stage 7 trust): " + skipped);
+                    + " vectors skipped as out of scope:\n  - "
+                    + String.join("\n  - ", skipped));
         }
         // Guard against silently testing fewer vectors than the corpus declares.
         assertEquals(vectors.size() - OUT_OF_SCOPE.size(), tests.size(),

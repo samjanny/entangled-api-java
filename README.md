@@ -76,42 +76,48 @@ in-scope vectors match the recorded verdict, diagnostic code, and structured
 > Note on vector count: the corpus at `v1.0-rc.48` contains **108** vectors
 > (`corpus.json` `rc_target: 1.0-rc.48`). Two of them, `210-trust-publisher-key-mismatch`
 > and `211-trust-user-rejected-new-identity`, exercise the Stage 7 trust-state
-> machine, which this implementation does not provide (see Known limitations).
+> machine, which is out of scope for this verifier (see Scope).
 > They are listed in an explicit out-of-scope set in `ConformanceTest` and
 > reported with a printed count rather than counted as failures, so 106 of the
 > 108 vectors run and all 106 pass.
 
-## Known limitations
+## Scope
 
-### Stage 7 trust-state machine not implemented
+Like the Rust reference crate (`entangled-core`), this library is a **verifier**:
+it covers the per-document validation pipeline (section 10 Stages 2 through 9)
+and deliberately leaves the section 10 Stage 7 trust-state machine - first
+contact, TOFU pinning, external PIP verification, and the Changed/mismatch
+detection that rejects a manifest presenting a different `K_publisher.pub` than a
+retained identity - to an embedding client layer. Trust-state resolution depends
+on retained publisher identity and history persisted across sessions, which is a
+stateful client concern rather than a per-document verification concern.
 
-This implementation does **not** provide the section 10 Stage 7 trust-state
-machine: first contact, TOFU pinning, external PIP verification, and the
-Changed/mismatch detection that rejects a manifest presenting a different
-`K_publisher.pub` than a retained identity. Because there is no retained
-publisher identity or history persistence here, a manifest signed correctly
-under a different publisher key is not recognized as a trust mismatch. The
-section 11 codes for this flow (`E_TRUST_MISMATCH`, `E_TRUST_USER_REJECTED`,
-`I_TRUST_FIRST_CONTACT`, `I_TRUST_TOFU_PINNED`, `I_TRUST_VERIFIED`) are present
-in `DiagnosticCode` but are not emitted.
+Consequently a manifest signed correctly under a different publisher key is
+verified as internally consistent and correctly self-signed, but is not detected
+as a trust mismatch: that detection belongs to the client layer that holds the
+retained identity. The section 11 codes for this flow (`E_TRUST_MISMATCH`,
+`E_TRUST_USER_REJECTED`, `I_TRUST_FIRST_CONTACT`, `I_TRUST_TOFU_PINNED`,
+`I_TRUST_VERIFIED`) are present in `DiagnosticCode` for catalog completeness but
+are not emitted here.
 
 The conformance corpus exercises this through vectors
 `210-trust-publisher-key-mismatch` and `211-trust-user-rejected-new-identity`;
 both are listed in an explicit out-of-scope set in `ConformanceTest` and
-reported with a printed count rather than counted as failures.
+reported with a printed count rather than counted as failures, so the scope
+boundary stays visible and never silently passes.
 
 **Security implication.** Trust-state resolution is what binds a site to a
-stable publisher identity across visits. Without it, this library verifies that
-a manifest is internally consistent and correctly signed under the
-`K_publisher.pub` it presents, but it does not detect that the presented key
-differs from one a client previously pinned for the same site. An embedding
-client that needs publisher-identity continuity (TOFU pinning, PIP verification,
-mismatch warnings) must implement that layer itself, or use a client that does.
+stable publisher identity across visits. This library verifies that a manifest
+is internally consistent and correctly signed under the `K_publisher.pub` it
+presents; it does not detect that the presented key differs from one a client
+previously pinned for the same site. An embedding client that needs
+publisher-identity continuity (TOFU pinning, PIP verification, mismatch warnings)
+must implement that layer on top of this verifier.
 
 **What is implemented.** The content-index flow (`content_root` hash binding and
 per-document `seq` / `hash` verification) and the policy-relative state check
 (`E_STATE_UNDECLARED`) are implemented and exercised by the corpus. Only the
-Stage 7 trust-state layer remains out of scope.
+Stage 7 trust-state layer is out of scope.
 
 ## Building and testing
 
