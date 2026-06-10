@@ -34,40 +34,62 @@ class ConformanceTest {
 
     private static final java.nio.file.Path ROOT = CorpusFiles.ROOT;
 
+    private static final String TRUST_REASON =
+            "Stage 7 trust-state machine is out of scope for this library";
+    private static final String IMAGE_REASON =
+            "section 03 image resource layer is out of scope for this library";
+    private static final String TRANSPORT_REASON =
+            "Stage 1 transport layer is out of scope for this library";
+
     /**
      * Vectors that exercise functionality this library documents as out of scope:
-     * the section 10 Stage 7 trust-state machine, and the section 03 image
+     * the section 10 Stage 7 trust-state machine, the section 03 image
      * resource layer (fetching, decoding, and the per-image W_IMAGE_* outcomes),
-     * which belongs to a client built on top of this verifier. Like the Rust
+     * and the Stage 1 transport layer (the rc.54 family 250-269, whose vectors
+     * carry HTTP response metadata in {@code context.transport_response} /
+     * {@code context.content_index_response} and are exercised by mock-response
+     * harnesses in implementations that own a fetch surface). All of these
+     * belong to a client built on top of this verifier. Like the Rust
      * reference crate, this library is a verifier: it covers the per-document
      * pipeline (Stages 2 through 9) but deliberately leaves trust-state
      * resolution - TOFU pinning, externally-verified PIP, retained-identity
      * mismatch detection, and the publisher-history persistence those require -
-     * and the image layer to an embedding client layer. These vectors are
-     * reported as skipped with a printed count rather than counted as failures,
-     * so the scope boundary is visible and never silently passes. Each entry is
-     * {@code id -> reason}. The image vectors are exercised by the
-     * entangled-client corpus harness.
+     * the image layer, and the transport layer to an embedding client layer.
+     * These vectors are reported as skipped with a printed count rather than
+     * counted as failures, so the scope boundary is visible and never silently
+     * passes. Each entry is {@code id -> reason}. The image vectors are
+     * exercised by the entangled-client corpus harness.
      */
-    private static final java.util.Map<String, String> OUT_OF_SCOPE = java.util.Map.of(
-            "210-trust-publisher-key-mismatch",
-            "Stage 7 trust-state machine is out of scope for this library",
-            "211-trust-user-rejected-new-identity",
-            "Stage 7 trust-state machine is out of scope for this library",
-            "215-trust-observed-mismatch",
-            "Stage 7 trust-state machine is out of scope for this library",
-            "240-image-valid-png",
-            "section 03 image resource layer is out of scope for this library",
-            "241-image-apng-animated",
-            "section 03 image resource layer is out of scope for this library",
-            "242-image-dimension-mismatch",
-            "section 03 image resource layer is out of scope for this library",
-            "243-image-hash-mismatch",
-            "section 03 image resource layer is out of scope for this library",
-            "244-image-content-type-mismatch",
-            "section 03 image resource layer is out of scope for this library",
-            "245-image-decode-failed",
-            "section 03 image resource layer is out of scope for this library");
+    private static final java.util.Map<String, String> OUT_OF_SCOPE = java.util.Map.ofEntries(
+            java.util.Map.entry("210-trust-publisher-key-mismatch", TRUST_REASON),
+            java.util.Map.entry("211-trust-user-rejected-new-identity", TRUST_REASON),
+            java.util.Map.entry("215-trust-observed-mismatch", TRUST_REASON),
+            java.util.Map.entry("240-image-valid-png", IMAGE_REASON),
+            java.util.Map.entry("241-image-apng-animated", IMAGE_REASON),
+            java.util.Map.entry("242-image-dimension-mismatch", IMAGE_REASON),
+            java.util.Map.entry("243-image-hash-mismatch", IMAGE_REASON),
+            java.util.Map.entry("244-image-content-type-mismatch", IMAGE_REASON),
+            java.util.Map.entry("245-image-decode-failed", IMAGE_REASON),
+            java.util.Map.entry("250-transport-accept-ignored-headers", TRANSPORT_REASON),
+            java.util.Map.entry("251-transport-status-unlisted", TRANSPORT_REASON),
+            java.util.Map.entry("252-transport-status-unlisted-2xx", TRANSPORT_REASON),
+            java.util.Map.entry("253-transport-redirect", TRANSPORT_REASON),
+            java.util.Map.entry("254-transport-content-type-missing", TRANSPORT_REASON),
+            java.util.Map.entry("255-transport-content-type-parameter", TRANSPORT_REASON),
+            java.util.Map.entry("256-transport-content-length-missing", TRANSPORT_REASON),
+            java.util.Map.entry("257-transport-content-length-inconsistent", TRANSPORT_REASON),
+            java.util.Map.entry("258-transport-body-failure", TRANSPORT_REASON),
+            java.util.Map.entry("259-transport-rate-limited", TRANSPORT_REASON),
+            java.util.Map.entry("260-transport-not-found", TRANSPORT_REASON),
+            java.util.Map.entry("261-transport-method-not-allowed", TRANSPORT_REASON),
+            java.util.Map.entry("262-transport-unavailable", TRANSPORT_REASON),
+            java.util.Map.entry("263-transport-content-encoding", TRANSPORT_REASON),
+            java.util.Map.entry("264-transport-transfer-encoding", TRANSPORT_REASON),
+            java.util.Map.entry("265-transport-submit-payload-too-large", TRANSPORT_REASON),
+            java.util.Map.entry("266-transport-submit-bad-request", TRANSPORT_REASON),
+            java.util.Map.entry("267-content-index-fetch-encoding", TRANSPORT_REASON),
+            java.util.Map.entry("268-content-index-fetch-status", TRANSPORT_REASON),
+            java.util.Map.entry("269-image-fetch-failed", IMAGE_REASON));
 
     @TestFactory
     List<DynamicTest> corpusVectors() {

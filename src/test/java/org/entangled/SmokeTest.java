@@ -11,7 +11,7 @@ class SmokeTest {
     @Test
     void specConstants() {
         assertEquals("1.0", Entangled.SPEC_VERSION);
-        assertEquals("1.0-rc.53", Entangled.SPEC_REVISION);
+        assertEquals("1.0-rc.54", Entangled.SPEC_REVISION);
     }
 
     /**

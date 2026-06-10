@@ -3893,6 +3893,7 @@ def negative_vectors(keys) -> list[dict]:
                   declared_w: int, declared_h: int,
                   declared_sha_of: bytes | None = None,
                   response_content_type: str = "image/png",
+                  response_status: int | None = None,
                   outcome: str) -> dict:
         path = f"/articles/{case_id}"
         block = {
@@ -3906,6 +3907,12 @@ def negative_vectors(keys) -> list[dict]:
         }
         doc = make_content(runtime_priv=rp, path=path,
                            title="Image vector", blocks=[block])
+        response: dict = {"file": f"vectors/{case_id}/image_0.png",
+                          "content_type": response_content_type}
+        if response_status is not None:
+            # Optional per-image fetch status (rc.54). Absent means 200,
+            # keeping the rc.52 vectors byte-identical.
+            response["status"] = response_status
         return vec(
             case_id,
             kind="content",
@@ -3917,10 +3924,7 @@ def negative_vectors(keys) -> list[dict]:
             context={
                 "fetched_path": path,
                 "expected_runtime_pubkey": b64u(rp_pub),
-                "image_responses": [
-                    {"file": f"vectors/{case_id}/image_0.png",
-                     "content_type": response_content_type},
-                ],
+                "image_responses": [response],
             },
             extra_files={"image_0.png": png},
         )
@@ -4002,6 +4006,441 @@ def negative_vectors(keys) -> list[dict]:
         "valid PNG rejected for animation.",
         png=garbage, declared_w=2, declared_h=2,
         outcome="W_IMAGE_DECODE_FAILED",
+    ))
+
+    # =====================================================================
+    # 250-269: Stage 1 transport (§09 wire profile, §11 transport codes).
+    #
+    # Each vector supplies the HTTP response metadata of the primary fetch
+    # in context.transport_response: `status` (integer), `headers` (object;
+    # the corpus uses canonical header casing and harnesses match header
+    # names case-insensitively per RFC 9110), and optionally `body_outcome`
+    # set to "failed" when the transport reported a body-retrieval failure
+    # (timeout, reset, early close) after delivering the input bytes, which
+    # are then a partial prefix and MUST NOT be presented as a complete
+    # body. When transport_response is absent (every vector outside this
+    # family), the harness presents the input as a clean 200 fetch with
+    # exact Content-Type and Content-Length, which is what the rest of the
+    # corpus has always assumed.
+    #
+    # Every response body in this family is a fully valid document, so the
+    # transport condition is the only live violation: an implementation
+    # that ignores the transport metadata and processes the body would
+    # accept the document, and the corpus reports the divergence. This
+    # also pins §09:513-515: the body of a non-200 response is ignored and
+    # never parsed as an Entangled document.
+    #
+    # The family is exercised by implementations that perform Stage 1
+    # transport classification. Document-verifier harnesses with no
+    # transport layer skip 250-269 as out of scope, exactly as for the
+    # trust and image families.
+    m_t = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    m_t_bytes = json.dumps(
+        m_t, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    h_doc_ok = {
+        "Content-Type": "application/entangled+json",
+        "Content-Length": str(len(m_t_bytes)),
+    }
+
+    def transport_vec(case_id: str, description: str, *, status: int,
+                      headers: dict, body: bytes = m_t_bytes,
+                      body_outcome: str | None = None,
+                      verdict: str = "reject",
+                      diagnostic: str | None = None,
+                      spec_refs: list[str] | None = None) -> dict:
+        response: dict = {"status": status, "headers": headers}
+        if body_outcome is not None:
+            response["body_outcome"] = body_outcome
+        return vec(
+            case_id,
+            kind="manifest",
+            description=description,
+            spec_refs=spec_refs or ["§09", "§11"],
+            verdict=verdict,
+            diagnostic=diagnostic,
+            body=body,
+            context={
+                "fetched_origin_address": m_t["origin"]["address"],
+                "transport_response": response,
+            },
+        )
+
+    # ---- 250: accept baseline; ignored response headers have no effect ----
+    out.append(transport_vec(
+        "250-transport-accept-ignored-headers",
+        "Manifest fetch answered 200 with exact Content-Type and "
+        "Content-Length and a valid manifest body, plus response headers "
+        "the client MUST ignore (§09:377-389): Set-Cookie, Cache-Control, "
+        "ETag, Server, and a custom X- header. The verdict is accept and "
+        "the ignored headers have no effect on client state; an "
+        "implementation that rejects the response, or alters its behavior, "
+        "because of headers outside the required list is non-conformant.",
+        status=200,
+        headers={
+            **h_doc_ok,
+            "Set-Cookie": "session=abc123; Path=/",
+            "Cache-Control": "no-store",
+            "ETag": "\"v1\"",
+            "Server": "entangled-test/1.0",
+            "X-Powered-By": "test-harness",
+        },
+        verdict="accept",
+        spec_refs=["§06", "§09"],
+    ))
+
+    # ---- 251-252: status codes outside the closed whitelist ----
+    out.append(transport_vec(
+        "251-transport-status-unlisted",
+        "Manifest fetch answered with status 418, outside the closed §09 "
+        "status whitelist. Per §09:462-476 a non-whitelisted code is a "
+        "generic transport error, E_TRANSPORT_STATUS; the client does not "
+        "interpret HTTP semantics as Entangled semantics. Headers and body "
+        "are otherwise valid (the body is a fully valid manifest), so the "
+        "status is the only live violation and the §09:515 body-ignored "
+        "rule is pinned at the same time.",
+        status=418,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_STATUS",
+    ))
+    out.append(transport_vec(
+        "252-transport-status-unlisted-2xx",
+        "Manifest fetch answered with status 206 Partial Content. Per "
+        "§09:368 and §09:474 any 2xx other than 200 is outside the "
+        "whitelist and is rejected as a transport error, "
+        "E_TRANSPORT_STATUS; a partial-content body does not correspond "
+        "to any signed object. Headers carry exact Content-Type and a "
+        "Content-Length consistent with the delivered bytes, and the body "
+        "is a fully valid manifest, so the status is the only live "
+        "violation.",
+        status=206,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_STATUS",
+    ))
+
+    # ---- 253: 3xx redirect; precedence over E_TRANSPORT_STATUS ----
+    out.append(transport_vec(
+        "253-transport-redirect",
+        "Manifest fetch answered with status 301 and a Location header. "
+        "Per §09:480-491 redirects are not supported: the client MUST NOT "
+        "interpret Location and MUST NOT issue follow-up requests. Per "
+        "§11:111 E_TRANSPORT_REDIRECT takes precedence over "
+        "E_TRANSPORT_STATUS for every 3xx code, which this vector pins. "
+        "The body is a fully valid manifest, so an implementation that "
+        "follows the redirect or parses the body diverges.",
+        status=301,
+        headers={**h_doc_ok, "Location": "/new/manifest.json"},
+        diagnostic="E_TRANSPORT_REDIRECT",
+    ))
+
+    # ---- 254-255: Content-Type strictness on 200 responses ----
+    out.append(transport_vec(
+        "254-transport-content-type-missing",
+        "Manifest fetch answered 200 with no Content-Type header. Per "
+        "§09:393-410 an absent Content-Type on a 200 response carrying an "
+        "Entangled document is rejected as E_TRANSPORT_CONTENT_TYPE and "
+        "the body is not parsed. Content-Length is present and consistent "
+        "and the body is a fully valid manifest, so the missing header is "
+        "the only live violation.",
+        status=200,
+        headers={"Content-Length": str(len(m_t_bytes))},
+        diagnostic="E_TRANSPORT_CONTENT_TYPE",
+    ))
+    out.append(transport_vec(
+        "255-transport-content-type-parameter",
+        "Manifest fetch answered 200 with Content-Type "
+        "application/entangled+json; charset=utf-8. Per §09:393-408 the "
+        "required value is exact with no parameters; a charset parameter "
+        "is redundant (Entangled JSON is always UTF-8) and rejected as "
+        "E_TRANSPORT_CONTENT_TYPE. This pins the exact-match rule against "
+        "implementations that compare the media-type essence after "
+        "parameter stripping, which would wrongly accept.",
+        status=200,
+        headers={
+            "Content-Type": "application/entangled+json; charset=utf-8",
+            "Content-Length": str(len(m_t_bytes)),
+        },
+        diagnostic="E_TRANSPORT_CONTENT_TYPE",
+    ))
+
+    # ---- 256-257: Content-Length missing / inconsistent ----
+    out.append(transport_vec(
+        "256-transport-content-length-missing",
+        "Manifest fetch answered 200 with exact Content-Type but no "
+        "Content-Length header. Per §09:372-375 the publisher MUST declare "
+        "the exact byte count; a missing Content-Length is rejected as "
+        "E_TRANSPORT_CONTENT_LENGTH (§11:100). The body is a fully valid "
+        "manifest, so the missing header is the only live violation.",
+        status=200,
+        headers={"Content-Type": "application/entangled+json"},
+        diagnostic="E_TRANSPORT_CONTENT_LENGTH",
+    ))
+    out.append(transport_vec(
+        "257-transport-content-length-inconsistent",
+        "Manifest fetch answered 200 whose Content-Length declares seven "
+        "bytes more than the delivered body. Per §09:452 the consistency "
+        "check compares the declared length against the same bytes the "
+        "application sees; a complete delivered body whose length differs "
+        "from the declaration is E_TRANSPORT_CONTENT_LENGTH (§11:100). "
+        "The transport itself completed (no body_outcome), distinguishing "
+        "this from the transport-failure condition of 258.",
+        status=200,
+        headers={
+            "Content-Type": "application/entangled+json",
+            "Content-Length": str(len(m_t_bytes) + 7),
+        },
+        diagnostic="E_TRANSPORT_CONTENT_LENGTH",
+    ))
+
+    # ---- 258: transport-level body retrieval failure ----
+    out.append(transport_vec(
+        "258-transport-body-failure",
+        "Manifest fetch answered 200 with exact Content-Type and a "
+        "Content-Length declaring the full document length, but the "
+        "transport failed while retrieving the body: body_outcome is "
+        "\"failed\" and the input holds only the 64-byte prefix delivered "
+        "before the failure. Per §11:101 a body that could not be "
+        "retrieved or was truncated by the transport is "
+        "E_TRANSPORT_BODY_FAILURE. The harness MUST NOT present the "
+        "prefix as a complete body; the explicit transport failure, not "
+        "the length comparison of 257, is the live condition.",
+        status=200,
+        headers=dict(h_doc_ok),
+        body=m_t_bytes[:64],
+        body_outcome="failed",
+        diagnostic="E_TRANSPORT_BODY_FAILURE",
+    ))
+
+    # ---- 259-262: whitelisted error statuses with dedicated codes ----
+    out.append(transport_vec(
+        "259-transport-rate-limited",
+        "Manifest fetch answered with status 429 Too Many Requests, a "
+        "whitelisted code meaning the publisher is rate-limiting the "
+        "client (§09:471). Classified as E_TRANSPORT_RATE_LIMITED "
+        "(§11:102); the client backs off before retry. Body and remaining "
+        "headers are valid and ignored per §09:387 and §09:515.",
+        status=429,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_RATE_LIMITED",
+    ))
+    out.append(transport_vec(
+        "260-transport-not-found",
+        "Manifest fetch answered with status 404 Not Found, a whitelisted "
+        "code meaning the path does not exist (§09:468). Classified as "
+        "E_TRANSPORT_NOT_FOUND (§11:103). The body is a fully valid "
+        "manifest and MUST be ignored per §09:515; an implementation that "
+        "parses and accepts it diverges.",
+        status=404,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_NOT_FOUND",
+    ))
+    out.append(transport_vec(
+        "261-transport-method-not-allowed",
+        "Manifest fetch answered with status 405 Method Not Allowed, a "
+        "whitelisted code (§09:469) that a conforming publisher reserves "
+        "for methods other than GET and POST (§09:36-38). A misbehaving "
+        "publisher answering a conforming GET with 405 is still "
+        "classified per the whitelist: E_TRANSPORT_METHOD_NOT_ALLOWED "
+        "(§11:104).",
+        status=405,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_METHOD_NOT_ALLOWED",
+    ))
+    out.append(transport_vec(
+        "262-transport-unavailable",
+        "Manifest fetch answered with status 503 Service Unavailable, a "
+        "whitelisted code meaning the publisher is temporarily unable to "
+        "serve (§09:472). Classified as E_TRANSPORT_UNAVAILABLE "
+        "(§11:106). The no-response flavor of the same code (transport-"
+        "level unreachability) has no wire bytes and stays at the "
+        "client's unit-test layer.",
+        status=503,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_UNAVAILABLE",
+    ))
+
+    # ---- 263-264: forbidden response encodings on 200 responses ----
+    out.append(transport_vec(
+        "263-transport-content-encoding",
+        "Manifest fetch answered 200 carrying Content-Encoding: gzip. Per "
+        "§09:430-436 the Content-Encoding header MUST NOT be present on "
+        "any Entangled response; the response is rejected as "
+        "E_TRANSPORT_CONTENT_ENCODING (§11:108) and the body is not "
+        "parsed. The delivered body is the raw (unencoded) valid manifest "
+        "with a consistent Content-Length, so the header's presence is "
+        "the only live violation.",
+        status=200,
+        headers={**h_doc_ok, "Content-Encoding": "gzip"},
+        diagnostic="E_TRANSPORT_CONTENT_ENCODING",
+    ))
+    out.append(transport_vec(
+        "264-transport-transfer-encoding",
+        "Manifest fetch answered 200 carrying Transfer-Encoding: chunked. "
+        "Per §09:438-444 transfer encodings are forbidden on any "
+        "Entangled response; the response is rejected as "
+        "E_TRANSPORT_TRANSFER_ENCODING (§11:109) and the body is not "
+        "parsed. Content-Length is deliberately present and consistent "
+        "with the delivered bytes so the Transfer-Encoding header is the "
+        "single live violation; Entangled forbids the header outright "
+        "regardless of RFC 9112 message-framing precedence.",
+        status=200,
+        headers={**h_doc_ok, "Transfer-Encoding": "chunked"},
+        diagnostic="E_TRANSPORT_TRANSFER_ENCODING",
+    ))
+
+    # ---- 265-266: submit-response statuses scoped to transactions ----
+    t_t, sb_t = make_transaction(runtime_priv=rp)
+    t_t_bytes = json.dumps(
+        t_t, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    sb_t_bytes = json.dumps(
+        sb_t, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    def submit_transport_vec(case_id: str, description: str, *,
+                             status: int, diagnostic: str) -> dict:
+        return vec(
+            case_id,
+            kind="transaction",
+            description=description,
+            spec_refs=["§09", "§11"],
+            verdict="reject",
+            diagnostic=diagnostic,
+            body=t_t_bytes,
+            context={
+                "submit_path": t_t["in_response_to"],
+                "expected_runtime_pubkey": b64u(rp_pub),
+                "submit_body_path": f"vectors/{case_id}/submit_body.json",
+                "transport_response": {
+                    "status": status,
+                    "headers": {
+                        "Content-Type": "application/entangled+json",
+                        "Content-Length": str(len(t_t_bytes)),
+                    },
+                },
+            },
+            extra_files={"submit_body.json": sb_t_bytes},
+        )
+
+    out.append(submit_transport_vec(
+        "265-transport-submit-payload-too-large",
+        "Submit answered with status 413 Payload Too Large, the "
+        "whitelisted code for a submit body exceeding 64 KiB (§09:238, "
+        "§09:470). Classified as E_TRANSPORT_PAYLOAD_TOO_LARGE (§11:105, "
+        "document kind transaction). The submit body on record is small "
+        "and valid; the vector pins the status classification, not the "
+        "size rule. The response body is a fully valid transaction bound "
+        "to that submit body and MUST be ignored per §09:515.",
+        status=413,
+        diagnostic="E_TRANSPORT_PAYLOAD_TOO_LARGE",
+    ))
+    out.append(submit_transport_vec(
+        "266-transport-submit-bad-request",
+        "Submit answered with status 400 Bad Request, the whitelisted "
+        "code for a submit body the publisher rejects as malformed "
+        "(§09:467). Classified as E_TRANSPORT_BAD_REQUEST (§11:107, "
+        "document kind transaction). The response body is a fully valid "
+        "transaction bound to the recorded submit body and MUST be "
+        "ignored per §09:515; an implementation that parses and accepts "
+        "it diverges.",
+        status=400,
+        diagnostic="E_TRANSPORT_BAD_REQUEST",
+    ))
+
+    # ---- 267-268: /content_index.json displacement ----
+    # Per §09:110 the content-index-specific E_CONTENT_INDEX_FETCH_FAILED
+    # displaces the generic Stage 1 codes for this resource, regardless of
+    # whether an implementation branches on the resource path before or
+    # after Stage 1 classification. The manifest is fully valid and its
+    # content_root matches the served index bytes, so the index-fetch
+    # transport condition is the only live violation. The index response
+    # metadata travels in context.content_index_response ({status,
+    # headers}); the served bytes stay in content_index_path, as for
+    # 230-235. Absent content_index_response means a clean 200 fetch.
+    idx_t = content_index_bytes({
+        indexed_path: {"seq": 5, "hash": sha256_b64u(b"first-post-body-v5")},
+    })
+
+    def index_transport_vec(case_id: str, description: str, *,
+                            status: int, headers: dict) -> dict:
+        m_idx = make_manifest(
+            publisher_priv=pp, publisher_pub=pp_pub,
+            origin_pub=op_pub, runtime_pub=rp_pub,
+        )
+        m_idx["content_root"] = sha256_b64u(idx_t)
+        del m_idx["sig"]
+        m_idx["sig"] = sign(pp, CTX_MANIFEST, m_idx)
+        return vec(
+            case_id,
+            kind="manifest",
+            description=description,
+            spec_refs=["§06", "§09", "§11"],
+            verdict="reject",
+            diagnostic="E_CONTENT_INDEX_FETCH_FAILED",
+            body_obj=m_idx,
+            context={
+                "fetched_origin_address": m_idx["origin"]["address"],
+                "content_index_path": f"vectors/{case_id}/content_index.json",
+                "content_index_response": {
+                    "status": status,
+                    "headers": headers,
+                },
+            },
+            extra_files={"content_index.json": idx_t},
+        )
+
+    out.append(index_transport_vec(
+        "267-content-index-fetch-encoding",
+        "Manifest declaring a content_root that matches the served "
+        "content_index.json bytes, whose index fetch is answered 200 with "
+        "a Content-Encoding: gzip header. Per §09:108-110 a header "
+        "violation on the /content_index.json resource maps to "
+        "E_CONTENT_INDEX_FETCH_FAILED, displacing the generic "
+        "E_TRANSPORT_CONTENT_ENCODING; an implementation that reports the "
+        "generic Stage 1 code on this wire condition diverges. The index "
+        "bytes are valid, structurally and against content_root, so the "
+        "header is the only live violation; per §09:116 the client MUST "
+        "NOT render content under this manifest.",
+        status=200,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(len(idx_t)),
+            "Content-Encoding": "gzip",
+        },
+    ))
+    out.append(index_transport_vec(
+        "268-content-index-fetch-status",
+        "Manifest declaring a content_root that matches the served "
+        "content_index.json bytes, whose index fetch is answered 404. Per "
+        "§09:116 a non-200 response on the /content_index.json resource "
+        "is E_CONTENT_INDEX_FETCH_FAILED; the client MUST NOT render "
+        "content under this manifest, because content_root is a "
+        "K_publisher-signed commitment and failure to honor it is "
+        "indistinguishable from server compromise. The served bytes and "
+        "remaining headers are valid and ignored.",
+        status=404,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": str(len(idx_t)),
+        },
+    ))
+
+    # ---- 269: image-resource fetch transport failure ----
+    out.append(image_vec(
+        "269-image-fetch-failed",
+        "Content document whose image block's resource fetch is answered "
+        "404: context.image_responses[0].status is 404 (absent means 200, "
+        "keeping 240-245 unchanged). Per §09:319 a non-200 status on an "
+        "image resource fetch is image-resource unavailable, "
+        "W_IMAGE_FETCH_FAILED (§11:342), and the §03 pipeline steps 3-9 "
+        "are not run. The served bytes match the declared sha256, "
+        "Content-Type, and dimensions, so an implementation that ignores "
+        "the status and runs the pipeline reaches accept and diverges. "
+        "The document verdict stays accept: per §03 an image-resource "
+        "failure never invalidates the containing signed document.",
+        png=png_2x2, declared_w=2, declared_h=2,
+        response_status=404,
+        outcome="W_IMAGE_FETCH_FAILED",
     ))
 
     return out
@@ -4091,7 +4530,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.53",
+        "rc_target": "1.0-rc.54",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,
