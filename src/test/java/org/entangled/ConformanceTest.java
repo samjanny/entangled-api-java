@@ -22,7 +22,7 @@ import org.junit.jupiter.api.TestFactory;
  * The normative conformance suite (corpus/README.md): drive every corpus vector
  * through the validation pipeline and assert the implementation's outcome
  * against the recorded {@code expected} verdict, diagnostic code, and structured
- * details. This is the code-vs-corpus verification; success is 88/88.
+ * details. This is the code-vs-corpus verification; success is 108/108.
  *
  * <p>The clock is mocked to {@code corpus.json.clock_now}. Each vector's
  * {@code context} block is mapped onto a {@link Context}: fetched origin/path,
