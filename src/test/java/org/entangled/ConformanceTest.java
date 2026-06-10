@@ -22,7 +22,7 @@ import org.junit.jupiter.api.TestFactory;
  * The normative conformance suite (corpus/README.md): drive every corpus vector
  * through the validation pipeline and assert the implementation's outcome
  * against the recorded {@code expected} verdict, diagnostic code, and structured
- * details. This is the code-vs-corpus verification; success is 108/108 driven (116 vectors, 8 out of scope for this library).
+ * details. This is the code-vs-corpus verification; success is 108/108 driven (117 vectors, 9 out of scope for this library).
  *
  * <p>The clock is mocked to {@code corpus.json.clock_now}. Each vector's
  * {@code context} block is mapped onto a {@link Context}: fetched origin/path,
@@ -53,6 +53,8 @@ class ConformanceTest {
             "210-trust-publisher-key-mismatch",
             "Stage 7 trust-state machine is out of scope for this library",
             "211-trust-user-rejected-new-identity",
+            "Stage 7 trust-state machine is out of scope for this library",
+            "215-trust-observed-mismatch",
             "Stage 7 trust-state machine is out of scope for this library",
             "240-image-valid-png",
             "section 03 image resource layer is out of scope for this library",
