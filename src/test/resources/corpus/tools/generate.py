@@ -1359,8 +1359,8 @@ def negative_vectors(keys) -> list[dict]:
     # ---- 148/149: transaction state_updates hard-range checks ----
     # A transaction "set" state update is validated standalone at Stage 5
     # (no manifest policy needed): a value over the 4096-byte hard ceiling is
-    # E_STATE_VALUE_SIZE (§11:286, §07:170), and a ttl outside the 300..7776000
-    # hard range is E_STATE_TTL (§11:287, §07:279). The dedicated state codes
+    # E_STATE_VALUE_SIZE (§11:288, §07:170), and a ttl outside the 300..7776000
+    # hard range is E_STATE_TTL (§11:289, §07:279). The dedicated state codes
     # apply, not the generic E_SCHEMA_FIELD_LENGTH / E_SCHEMA_FIELD_RANGE.
     t_state_value, _ = make_transaction(
         runtime_priv=rp,
@@ -1375,7 +1375,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "148-state-value-size",
         kind="transaction",
-        description="Transaction whose state_updates set operation carries a value of 4097 raw UTF-8 bytes, one over the 4096-byte protocol hard ceiling (§07). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_VALUE_SIZE (§11:286), the dedicated state code, not the generic E_SCHEMA_FIELD_LENGTH. Signed by K_runtime; namespace, key, and ttl are valid, so the oversized value is the only live violation.",
+        description="Transaction whose state_updates set operation carries a value of 4097 raw UTF-8 bytes, one over the 4096-byte protocol hard ceiling (§07). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_VALUE_SIZE (§11:288), the dedicated state code, not the generic E_SCHEMA_FIELD_LENGTH. Signed by K_runtime; namespace, key, and ttl are valid, so the oversized value is the only live violation.",
         spec_refs=["§07", "§11"],
         verdict="reject",
         diagnostic="E_STATE_VALUE_SIZE",
@@ -1396,7 +1396,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "149-state-ttl",
         kind="transaction",
-        description="Transaction whose state_updates set operation carries a ttl of 7776001 seconds, one over the 7776000-second (90-day) hard upper bound (§07:279). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_TTL (§11:287), the dedicated state code, not the generic E_SCHEMA_FIELD_RANGE. Signed by K_runtime; value, namespace, and key are valid, so the out-of-range ttl is the only live violation.",
+        description="Transaction whose state_updates set operation carries a ttl of 7776001 seconds, one over the 7776000-second (90-day) hard upper bound (§07:279). The state_updates array is validated standalone at Stage 5; rejected with E_STATE_TTL (§11:289), the dedicated state code, not the generic E_SCHEMA_FIELD_RANGE. Signed by K_runtime; value, namespace, and key are valid, so the out-of-range ttl is the only live violation.",
         spec_refs=["§07", "§11"],
         verdict="reject",
         diagnostic="E_STATE_TTL",
@@ -1406,7 +1406,7 @@ def negative_vectors(keys) -> list[dict]:
 
     # ---- 220/221: state update references an undeclared (namespace, key) ----
     # Unlike 148/149/163/164, which are standalone Stage 5 checks on the
-    # state_updates array, E_STATE_UNDECLARED (§07:252, §11:287) needs the
+    # state_updates array, E_STATE_UNDECLARED (§07:252, §11:289) needs the
     # manifest's state_policy to resolve which (namespace, key) pairs are
     # declared. The transactions below are otherwise valid and signed by
     # K_runtime; context.previously_verified points at 002, whose state_policy
@@ -1425,7 +1425,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "220-state-undeclared-set",
         kind="transaction",
-        description="Transaction whose state_updates set operation references (session, token). The namespace session is declared by the manifest's state_policy (002) but the key token is not, so the pair is undeclared. Per §07:252 a state update referencing a (namespace, key) not in the current state_policy is rejected with E_STATE_UNDECLARED (§11:287). The set is otherwise well-formed (value and ttl in range) and signed by K_runtime, so the undeclared reference is the only live violation. Resolving the declared set needs the manifest, so context.previously_verified points at 002.",
+        description="Transaction whose state_updates set operation references (session, token). The namespace session is declared by the manifest's state_policy (002) but the key token is not, so the pair is undeclared. Per §07:252 a state update referencing a (namespace, key) not in the current state_policy is rejected with E_STATE_UNDECLARED (§11:289). The set is otherwise well-formed (value and ttl in range) and signed by K_runtime, so the undeclared reference is the only live violation. Resolving the declared set needs the manifest, so context.previously_verified points at 002.",
         spec_refs=["§07", "§11"],
         verdict="reject",
         diagnostic="E_STATE_UNDECLARED",
@@ -1454,7 +1454,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "221-state-undeclared-delete",
         kind="transaction",
-        description="Transaction whose state_updates delete operation references (analytics, visits), a pair the manifest's state_policy (002) does not declare at all. Per §07:323 a delete referencing an undeclared (namespace, key) is rejected with E_STATE_UNDECLARED (§11:287), the same dedicated code as the set form. The delete is otherwise well-formed (exactly op, namespace, key) and signed by K_runtime, so the undeclared reference is the only live violation. context.previously_verified points at 002 to resolve the declared set.",
+        description="Transaction whose state_updates delete operation references (analytics, visits), a pair the manifest's state_policy (002) does not declare at all. Per §07:323 a delete referencing an undeclared (namespace, key) is rejected with E_STATE_UNDECLARED (§11:289), the same dedicated code as the set form. The delete is otherwise well-formed (exactly op, namespace, key) and signed by K_runtime, so the undeclared reference is the only live violation. context.previously_verified points at 002 to resolve the declared set.",
         spec_refs=["§07", "§11"],
         verdict="reject",
         diagnostic="E_STATE_UNDECLARED",
@@ -1526,7 +1526,7 @@ def negative_vectors(keys) -> list[dict]:
 
     # ---- 169-state-ttl-over-u32 (Stage 5, E_STATE_TTL; AMB-27) ----
     # A set ttl that is a conforming 64-bit integer above u32::MAX but far
-    # outside the 300..7776000 hard range. Per §11:289 an out-of-bounds set ttl
+    # outside the 300..7776000 hard range. Per §11:291 an out-of-bounds set ttl
     # is the dedicated E_STATE_TTL regardless of the value's magnitude; it must
     # not collapse to a generic integer-width range code (E_SCHEMA_FIELD_RANGE)
     # because the value happens to exceed a particular implementation's integer
@@ -1544,7 +1544,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "169-state-ttl-over-u32",
         kind="transaction",
-        description="Transaction whose state_updates set operation carries a ttl of 5000000000, a conforming 64-bit integer above u32::MAX but far outside the 300..7776000 hard range (§07:279). Per §11:289 an out-of-bounds set ttl is the dedicated E_STATE_TTL, regardless of the value's magnitude; it must not be reported as a generic integer-width range code (E_SCHEMA_FIELD_RANGE). The state_updates array is validated standalone at Stage 5; value, namespace, and key are valid, so the out-of-range ttl is the only live violation. Signed by K_runtime. Pairs with 149 (ttl 7776001, within u32; same code).",
+        description="Transaction whose state_updates set operation carries a ttl of 5000000000, a conforming 64-bit integer above u32::MAX but far outside the 300..7776000 hard range (§07:279). Per §11:291 an out-of-bounds set ttl is the dedicated E_STATE_TTL, regardless of the value's magnitude; it must not be reported as a generic integer-width range code (E_SCHEMA_FIELD_RANGE). The state_updates array is validated standalone at Stage 5; value, namespace, and key are valid, so the out-of-range ttl is the only live violation. Signed by K_runtime. Pairs with 149 (ttl 7776001, within u32; same code).",
         spec_refs=["§07", "§11"],
         verdict="reject",
         diagnostic="E_STATE_TTL",
@@ -1952,8 +1952,8 @@ def negative_vectors(keys) -> list[dict]:
         context={"fetched_origin_address": m_194["origin"]["address"]},
     ))
 
-    # ---- 195-canary-issued-at-impossible-date (Stage 8, E_CANARY_INVALID; §04, §11:209) ----
-    # canary.issued_at matches the shape but denotes February 30. Per §11:209 and
+    # ---- 195-canary-issued-at-impossible-date (Stage 8, E_CANARY_INVALID; §04, §11:211) ----
+    # canary.issued_at matches the shape but denotes February 30. Per §11:211 and
     # §04, a calendrically invalid canary timestamp is part of the canary Invalid
     # state and is reported at Stage 8 as E_CANARY_INVALID, not as a generic
     # Stage 5 schema code. next_expected is a valid date; issued_at is the only
@@ -1970,7 +1970,7 @@ def negative_vectors(keys) -> list[dict]:
         description=(
             "Manifest whose canary.issued_at matches the YYYY-MM-DDTHH:MM:SSZ "
             "shape but denotes an impossible calendar date (2026-02-30, February "
-            "30). Per §04 RFC 3339 timestamp validity and §11:209, a "
+            "30). Per §04 RFC 3339 timestamp validity and §11:211, a "
             "calendrically invalid canary timestamp is part of the canary "
             "Invalid state and is reported at Stage 8 as E_CANARY_INVALID, not "
             "as a generic Stage 5 schema code. The manifest is signed correctly "
@@ -2672,7 +2672,7 @@ def negative_vectors(keys) -> list[dict]:
 
     # ---- 156-sig-invalid-key-no-manifest (Stage 6, E_SIG_INVALID_KEY) ----
     # Content document presented without any previously verified manifest
-    # for its publisher. Per §11:175, the absence of an authorized
+    # for its publisher. Per §11:177, the absence of an authorized
     # runtime_pubkey to verify against is E_SIG_INVALID_KEY, distinct
     # from E_SIG_VERIFICATION (signature decoded and the verify equation
     # failed). The content body and signature are themselves well-formed;
@@ -2686,7 +2686,7 @@ def negative_vectors(keys) -> list[dict]:
         description=(
             "Content document presented without any verified manifest "
             "supplying an authorized runtime_pubkey for the publisher. "
-            "Per §11:172,175 the absence of the expected verification "
+            "Per §11:174,175 the absence of the expected verification "
             "key yields E_SIG_INVALID_KEY, distinct from "
             "E_SIG_VERIFICATION which requires a key that decodes and "
             "fails the verify equation. The content body and signature "
@@ -2960,7 +2960,7 @@ def negative_vectors(keys) -> list[dict]:
     # positive fixture and keep the live manifest at clock_now without
     # creating a future-skew confound). The presented manifest at
     # clock_now (issued_at 2026-05-07) declares the same runtime_pubkey
-    # as the prior. Per §08 (rc.19 N55) and §11:200, rotation MUST
+    # as the prior. Per §08 (rc.19 N55) and §11:202, rotation MUST
     # produce a distinct runtime_pubkey; reuse is rejected as
     # E_CANARY_RUNTIME_REUSE at Stage 8. Both the prior and the
     # presented manifest are signed correctly, are within canary
@@ -2990,7 +2990,7 @@ def negative_vectors(keys) -> list[dict]:
             "prior_manifest.json) authorizes runtime_pubkey X. The "
             "presented manifest at clock_now (issued_at 2026-05-07) for "
             "the same K_publisher.pub declares the same runtime_pubkey "
-            "X. Per §08 (rc.19 N55) and §11:200, rotation MUST produce "
+            "X. Per §08 (rc.19 N55) and §11:202, rotation MUST produce "
             "a distinct runtime_pubkey; reuse is rejected as "
             "E_CANARY_RUNTIME_REUSE at Stage 8. Both manifests are "
             "signed correctly and otherwise valid; the rotation-proof "
@@ -3739,7 +3739,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "230-content-index-hash-mismatch",
         kind="manifest",
-        description="Manifest declaring a content_root whose SHA-256 does not match the exact bytes of the served content_index.json (provided in extra_files). The index is structurally valid, so the live failure is E_CONTENT_INDEX_HASH_MISMATCH (§10:601, §11:244), not E_CONTENT_INDEX_INVALID. Signed correctly by K_publisher; per §10:603 an index hash failure blocks rendering of all content under this manifest.",
+        description="Manifest declaring a content_root whose SHA-256 does not match the exact bytes of the served content_index.json (provided in extra_files). The index is structurally valid, so the live failure is E_CONTENT_INDEX_HASH_MISMATCH (§10:601, §11:246), not E_CONTENT_INDEX_INVALID. Signed correctly by K_publisher; per §10:603 an index hash failure blocks rendering of all content under this manifest.",
         spec_refs=["§06", "§09", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_INDEX_HASH_MISMATCH",
@@ -3769,7 +3769,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "231-content-index-invalid",
         kind="manifest",
-        description="Manifest whose content_root matches the served content_index.json bytes, but the index fails structural validation: an entry carries a field beyond the closed {seq, hash} entry schema (§02:229-234). The hash check passes, so the live failure is E_CONTENT_INDEX_INVALID (§10:601, §11:245), not E_CONTENT_INDEX_HASH_MISMATCH. Signed correctly by K_publisher.",
+        description="Manifest whose content_root matches the served content_index.json bytes, but the index fails structural validation: an entry carries a field beyond the closed {seq, hash} entry schema (§02:229-234). The hash check passes, so the live failure is E_CONTENT_INDEX_INVALID (§10:601, §11:247), not E_CONTENT_INDEX_HASH_MISMATCH. Signed correctly by K_publisher.",
         spec_refs=["§02", "§09", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_INDEX_INVALID",
@@ -4027,7 +4027,7 @@ def negative_vectors(keys) -> list[dict]:
     # transport condition is the only live violation: an implementation
     # that ignores the transport metadata and processes the body would
     # accept the document, and the corpus reports the divergence. This
-    # also pins §09:513-515: the body of a non-200 response is ignored and
+    # also pins §09:517-517: the body of a non-200 response is ignored and
     # never parsed as an Entangled document.
     #
     # The family is exercised by implementations that perform Stage 1
@@ -4099,7 +4099,7 @@ def negative_vectors(keys) -> list[dict]:
         "generic transport error, E_TRANSPORT_STATUS; the client does not "
         "interpret HTTP semantics as Entangled semantics. Headers and body "
         "are otherwise valid (the body is a fully valid manifest), so the "
-        "status is the only live violation and the §09:515 body-ignored "
+        "status is the only live violation and the §09:517 body-ignored "
         "rule is pinned at the same time.",
         status=418,
         headers=dict(h_doc_ok),
@@ -4124,7 +4124,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(transport_vec(
         "253-transport-redirect",
         "Manifest fetch answered with status 301 and a Location header. "
-        "Per §09:480-491 redirects are not supported: the client MUST NOT "
+        "Per §09:482-493 redirects are not supported: the client MUST NOT "
         "interpret Location and MUST NOT issue follow-up requests. Per "
         "§11:111 E_TRANSPORT_REDIRECT takes precedence over "
         "E_TRANSPORT_STATUS for every 3xx code, which this vector pins. "
@@ -4220,7 +4220,7 @@ def negative_vectors(keys) -> list[dict]:
         "whitelisted code meaning the publisher is rate-limiting the "
         "client (§09:471). Classified as E_TRANSPORT_RATE_LIMITED "
         "(§11:102); the client backs off before retry. Body and remaining "
-        "headers are valid and ignored per §09:387 and §09:515.",
+        "headers are valid and ignored per §09:387 and §09:517.",
         status=429,
         headers=dict(h_doc_ok),
         diagnostic="E_TRANSPORT_RATE_LIMITED",
@@ -4230,7 +4230,7 @@ def negative_vectors(keys) -> list[dict]:
         "Manifest fetch answered with status 404 Not Found, a whitelisted "
         "code meaning the path does not exist (§09:468). Classified as "
         "E_TRANSPORT_NOT_FOUND (§11:103). The body is a fully valid "
-        "manifest and MUST be ignored per §09:515; an implementation that "
+        "manifest and MUST be ignored per §09:517; an implementation that "
         "parses and accepts it diverges.",
         status=404,
         headers=dict(h_doc_ok),
@@ -4330,7 +4330,7 @@ def negative_vectors(keys) -> list[dict]:
         "document kind transaction). The submit body on record is small "
         "and valid; the vector pins the status classification, not the "
         "size rule. The response body is a fully valid transaction bound "
-        "to that submit body and MUST be ignored per §09:515.",
+        "to that submit body and MUST be ignored per §09:517.",
         status=413,
         diagnostic="E_TRANSPORT_PAYLOAD_TOO_LARGE",
     ))
@@ -4341,7 +4341,7 @@ def negative_vectors(keys) -> list[dict]:
         "(§09:467). Classified as E_TRANSPORT_BAD_REQUEST (§11:107, "
         "document kind transaction). The response body is a fully valid "
         "transaction bound to the recorded submit body and MUST be "
-        "ignored per §09:515; an implementation that parses and accepts "
+        "ignored per §09:517; an implementation that parses and accepts "
         "it diverges.",
         status=400,
         diagnostic="E_TRANSPORT_BAD_REQUEST",
@@ -4432,7 +4432,7 @@ def negative_vectors(keys) -> list[dict]:
         "404: context.image_responses[0].status is 404 (absent means 200, "
         "keeping 240-245 unchanged). Per §09:319 a non-200 status on an "
         "image resource fetch is image-resource unavailable, "
-        "W_IMAGE_FETCH_FAILED (§11:342), and the §03 pipeline steps 3-9 "
+        "W_IMAGE_FETCH_FAILED (§11:344), and the §03 pipeline steps 3-9 "
         "are not run. The served bytes match the declared sha256, "
         "Content-Type, and dimensions, so an implementation that ignores "
         "the status and runs the pipeline reaches accept and diverges. "
@@ -4441,6 +4441,45 @@ def negative_vectors(keys) -> list[dict]:
         png=png_2x2, declared_w=2, declared_h=2,
         response_status=404,
         outcome="W_IMAGE_FETCH_FAILED",
+    ))
+
+    # ---- 270-271: whitelisted submit-scoped statuses on a GET (AMB-30) ----
+    # 400 and 413 are inside the §09 whitelist but their semantics are
+    # submit-scoped; §11 scopes E_TRANSPORT_BAD_REQUEST and
+    # E_TRANSPORT_PAYLOAD_TOO_LARGE to document kind transaction. Per the
+    # §09 "Status codes" out-of-context rule (AMB-30, rc.55), receiving
+    # either on a GET for an Entangled document is an unexpected transport
+    # response: the generic E_TRANSPORT_STATUS, exactly as for a code
+    # outside the whitelist.
+    out.append(transport_vec(
+        "270-transport-status-bad-request-on-get",
+        "Manifest fetch answered with status 400 Bad Request. The code is "
+        "whitelisted, but its §09 semantics are submit-scoped (\"Submit "
+        "body malformed\", §09:467) and a GET carries no submit body. Per "
+        "the §09 \"Status codes\" out-of-context rule (AMB-30) the client "
+        "treats it as an unexpected transport response: "
+        "E_TRANSPORT_STATUS, not the transaction-scoped "
+        "E_TRANSPORT_BAD_REQUEST (§11:107). Pairs with 266, where the "
+        "same status on a submit response keeps the dedicated code. "
+        "Headers and body are otherwise valid, so the out-of-context "
+        "status is the only live violation.",
+        status=400,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_STATUS",
+    ))
+    out.append(transport_vec(
+        "271-transport-status-payload-too-large-on-get",
+        "Manifest fetch answered with status 413 Payload Too Large. The "
+        "code is whitelisted, but its §09 semantics are submit-scoped "
+        "(\"Body exceeds size limit\", §09:470) and a GET carries no "
+        "request body. Per the §09 \"Status codes\" out-of-context rule "
+        "(AMB-30) the client treats it as an unexpected transport "
+        "response: E_TRANSPORT_STATUS, not the transaction-scoped "
+        "E_TRANSPORT_PAYLOAD_TOO_LARGE (§11:105). Pairs with 265, where "
+        "the same status on a submit response keeps the dedicated code.",
+        status=413,
+        headers=dict(h_doc_ok),
+        diagnostic="E_TRANSPORT_STATUS",
     ))
 
     return out
@@ -4530,7 +4569,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.54",
+        "rc_target": "1.0-rc.55",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,

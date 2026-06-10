@@ -89,7 +89,9 @@ class ConformanceTest {
             java.util.Map.entry("266-transport-submit-bad-request", TRANSPORT_REASON),
             java.util.Map.entry("267-content-index-fetch-encoding", TRANSPORT_REASON),
             java.util.Map.entry("268-content-index-fetch-status", TRANSPORT_REASON),
-            java.util.Map.entry("269-image-fetch-failed", IMAGE_REASON));
+            java.util.Map.entry("269-image-fetch-failed", IMAGE_REASON),
+            java.util.Map.entry("270-transport-status-bad-request-on-get", TRANSPORT_REASON),
+            java.util.Map.entry("271-transport-status-payload-too-large-on-get", TRANSPORT_REASON));
 
     @TestFactory
     List<DynamicTest> corpusVectors() {
