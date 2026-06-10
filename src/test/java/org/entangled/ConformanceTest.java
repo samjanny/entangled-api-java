@@ -22,7 +22,7 @@ import org.junit.jupiter.api.TestFactory;
  * The normative conformance suite (corpus/README.md): drive every corpus vector
  * through the validation pipeline and assert the implementation's outcome
  * against the recorded {@code expected} verdict, diagnostic code, and structured
- * details. This is the code-vs-corpus verification; success is 108/108 driven (110 vectors, 2 out of scope for this library).
+ * details. This is the code-vs-corpus verification; success is 108/108 driven (116 vectors, 8 out of scope for this library).
  *
  * <p>The clock is mocked to {@code corpus.json.clock_now}. Each vector's
  * {@code context} block is mapped onto a {@link Context}: fetched origin/path,
@@ -35,21 +35,37 @@ class ConformanceTest {
     private static final java.nio.file.Path ROOT = CorpusFiles.ROOT;
 
     /**
-     * Vectors that exercise functionality this library documents as out of scope
-     * (the section 10 Stage 7 trust-state machine). Like the Rust reference
-     * crate, this library is a verifier: it covers the per-document pipeline
-     * (Stages 2 through 9) but deliberately leaves trust-state resolution - TOFU
-     * pinning, externally-verified PIP, retained-identity mismatch detection, and
-     * the publisher-history persistence those require - to an embedding client
-     * layer. These vectors are reported as skipped with a printed count rather
-     * than counted as failures, so the scope boundary is visible and never
-     * silently passes. Each entry is {@code id -> reason}.
+     * Vectors that exercise functionality this library documents as out of scope:
+     * the section 10 Stage 7 trust-state machine, and the section 03 image
+     * resource layer (fetching, decoding, and the per-image W_IMAGE_* outcomes),
+     * which belongs to a client built on top of this verifier. Like the Rust
+     * reference crate, this library is a verifier: it covers the per-document
+     * pipeline (Stages 2 through 9) but deliberately leaves trust-state
+     * resolution - TOFU pinning, externally-verified PIP, retained-identity
+     * mismatch detection, and the publisher-history persistence those require -
+     * and the image layer to an embedding client layer. These vectors are
+     * reported as skipped with a printed count rather than counted as failures,
+     * so the scope boundary is visible and never silently passes. Each entry is
+     * {@code id -> reason}. The image vectors are exercised by the
+     * entangled-client corpus harness.
      */
     private static final java.util.Map<String, String> OUT_OF_SCOPE = java.util.Map.of(
             "210-trust-publisher-key-mismatch",
             "Stage 7 trust-state machine is out of scope for this library",
             "211-trust-user-rejected-new-identity",
-            "Stage 7 trust-state machine is out of scope for this library");
+            "Stage 7 trust-state machine is out of scope for this library",
+            "240-image-valid-png",
+            "section 03 image resource layer is out of scope for this library",
+            "241-image-apng-animated",
+            "section 03 image resource layer is out of scope for this library",
+            "242-image-dimension-mismatch",
+            "section 03 image resource layer is out of scope for this library",
+            "243-image-hash-mismatch",
+            "section 03 image resource layer is out of scope for this library",
+            "244-image-content-type-mismatch",
+            "section 03 image resource layer is out of scope for this library",
+            "245-image-decode-failed",
+            "section 03 image resource layer is out of scope for this library");
 
     @TestFactory
     List<DynamicTest> corpusVectors() {

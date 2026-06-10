@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 import sys
+import zlib
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -221,6 +222,98 @@ def compute_pip(pub_key: bytes, wordlist: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Image resource bytes (§03)
+#
+# Built without invoking a DEFLATE compressor: pixel data is wrapped in
+# uncompressed (stored) DEFLATE blocks, so the emitted bytes are identical
+# across platforms and zlib builds. Only the CRC-32 and Adler-32 checksums
+# come from the zlib module, and those are fixed functions of the input.
+# ---------------------------------------------------------------------------
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+
+
+def _zlib_stored(raw: bytes) -> bytes:
+    """A zlib stream wrapping `raw` in stored (uncompressed) DEFLATE blocks."""
+    out = bytearray(b"\x78\x01")
+    if not raw:
+        out += bytes([0x01, 0x00, 0x00, 0xFF, 0xFF])
+    else:
+        i = 0
+        while i < len(raw):
+            chunk = raw[i:i + 65535]
+            i += len(chunk)
+            out.append(0x01 if i >= len(raw) else 0x00)
+            out += len(chunk).to_bytes(2, "little")
+            out += (len(chunk) ^ 0xFFFF).to_bytes(2, "little")
+            out += chunk
+    out += (zlib.adler32(raw) & 0xFFFFFFFF).to_bytes(4, "big")
+    return bytes(out)
+
+
+def _png_chunk(ctype: bytes, data: bytes) -> bytes:
+    crc = zlib.crc32(ctype + data) & 0xFFFFFFFF
+    return len(data).to_bytes(4, "big") + ctype + data + crc.to_bytes(4, "big")
+
+
+def _png_ihdr(width: int, height: int) -> bytes:
+    """IHDR for an 8-bit grayscale, non-interlaced image."""
+    return _png_chunk(
+        b"IHDR",
+        width.to_bytes(4, "big") + height.to_bytes(4, "big")
+        + bytes([8, 0, 0, 0, 0]),
+    )
+
+
+def _png_pixel_stream(width: int, height: int) -> bytes:
+    """All-black rows (filter byte 0 per row) in a stored-deflate zlib stream."""
+    return _zlib_stored((b"\x00" + b"\x00" * width) * height)
+
+
+def make_png(width: int, height: int) -> bytes:
+    """A minimal valid single-frame grayscale PNG, byte-deterministic."""
+    return (
+        _PNG_SIG
+        + _png_ihdr(width, height)
+        + _png_chunk(b"IDAT", _png_pixel_stream(width, height))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+def _apng_fctl(seq: int, width: int, height: int) -> bytes:
+    """APNG frame control: full-canvas frame, 1/10 s delay, no dispose/blend."""
+    data = (
+        seq.to_bytes(4, "big")
+        + width.to_bytes(4, "big") + height.to_bytes(4, "big")
+        + (0).to_bytes(4, "big") + (0).to_bytes(4, "big")
+        + (1).to_bytes(2, "big") + (10).to_bytes(2, "big")
+        + bytes([0, 0])
+    )
+    return _png_chunk(b"fcTL", data)
+
+
+def make_apng(width: int, height: int) -> bytes:
+    """A minimal valid two-frame animated PNG (APNG), byte-deterministic.
+
+    Carries the acTL chunk before the first IDAT - the animation marker a
+    conforming client detects per §03 - plus the fcTL/fdAT frame structure
+    that makes the file a well-formed APNG for real decoders. Frame data is
+    the same stored-deflate stream as IDAT; each frame is its own complete
+    zlib datastream per the APNG specification.
+    """
+    pixels = _png_pixel_stream(width, height)
+    return (
+        _PNG_SIG
+        + _png_ihdr(width, height)
+        + _png_chunk(b"acTL", (2).to_bytes(4, "big") + (0).to_bytes(4, "big"))
+        + _apng_fctl(0, width, height)
+        + _png_chunk(b"IDAT", pixels)
+        + _apng_fctl(1, width, height)
+        + _png_chunk(b"fdAT", (2).to_bytes(4, "big") + pixels)
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+# ---------------------------------------------------------------------------
 # Domain separation context strings (§05)
 # ---------------------------------------------------------------------------
 CTX_MANIFEST = "ENTANGLED-v1 manifest"
@@ -373,6 +466,7 @@ def vec(vid: str, kind: str, description: str, spec_refs: list[str],
         verdict: str, *, body: bytes | None = None,
         body_obj: dict | None = None, diagnostic: str | None = None,
         diagnostic_details: dict | None = None,
+        image_outcomes: list[str] | None = None,
         context: dict | None = None,
         extra_files: dict[str, bytes] | None = None) -> dict:
     """Build a corpus vector entry and write its files."""
@@ -387,6 +481,8 @@ def vec(vid: str, kind: str, description: str, spec_refs: list[str],
         expected["diagnostic"] = diagnostic
     if diagnostic_details is not None:
         expected["diagnostic_details"] = diagnostic_details
+    if image_outcomes is not None:
+        expected["image_outcomes"] = image_outcomes
     entry = {
         "id": vid,
         "kind": kind,
@@ -3745,6 +3841,141 @@ def negative_vectors(keys) -> list[dict]:
         extra_files={"content_index.json": seq_index_bytes},
     ))
 
+    # =====================================================================
+    # 240-245: image resource layer (§03 image fetching and verification).
+    #
+    # Each vector is a valid content document carrying one image block, with
+    # the fetched image-resource response supplied alongside: the response
+    # body bytes in extra_files, and the response Content-Type in
+    # context.image_responses (one entry per image block, in document
+    # order; each entry has `file`, corpus-root-relative, and
+    # `content_type`). The DOCUMENT verdict is `accept` in every vector:
+    # per §03 an image-resource failure renders the image as missing and
+    # never invalidates the containing signed document. The per-image
+    # outcome is recorded in expected.image_outcomes, aligned index-by-index
+    # with context.image_responses: the string "accept", or the W_IMAGE_*
+    # diagnostic from §11 for the first failing step of the §03 pipeline.
+    #
+    # These vectors exercise the client-side image layer (§03 steps 3-9),
+    # which is out of scope for verifier-only implementations in the same
+    # way as the Stage 7 trust-state vectors 210-211. Image bytes are built
+    # without a DEFLATE compressor (stored blocks only, see make_png), so
+    # the corpus stays byte-deterministic across platforms.
+    def image_vec(case_id: str, description: str, *, png: bytes,
+                  declared_w: int, declared_h: int,
+                  declared_sha_of: bytes | None = None,
+                  response_content_type: str = "image/png",
+                  outcome: str) -> dict:
+        path = f"/articles/{case_id}"
+        block = {
+            "kind": "image",
+            "src": "/assets/test.png",
+            "sha256": sha256_b64u(png if declared_sha_of is None else declared_sha_of),
+            "media_type": "image/png",
+            "width": declared_w,
+            "height": declared_h,
+            "alt": "test image",
+        }
+        doc = make_content(runtime_priv=rp, path=path,
+                           title="Image vector", blocks=[block])
+        return vec(
+            case_id,
+            kind="content",
+            description=description,
+            spec_refs=["§03", "§11"],
+            verdict="accept",
+            image_outcomes=[outcome],
+            body_obj=doc,
+            context={
+                "fetched_path": path,
+                "expected_runtime_pubkey": b64u(rp_pub),
+                "image_responses": [
+                    {"file": f"vectors/{case_id}/image_0.png",
+                     "content_type": response_content_type},
+                ],
+            },
+            extra_files={"image_0.png": png},
+        )
+
+    png_2x2 = make_png(2, 2)
+
+    out.append(image_vec(
+        "240-image-valid-png",
+        "Valid content document with one image block, served a well-formed "
+        "2x2 single-frame PNG whose bytes match the declared sha256, whose "
+        "Content-Type matches the declared media_type, and whose decoded "
+        "dimensions match the declared width and height. Every step of the "
+        "§03 image pipeline passes; the image outcome is accept.",
+        png=png_2x2, declared_w=2, declared_h=2,
+        outcome="accept",
+    ))
+
+    out.append(image_vec(
+        "241-image-apng-animated",
+        "Content document whose image block is served a well-formed 2x2 "
+        "two-frame animated PNG (APNG): an acTL chunk precedes the first "
+        "IDAT, with the fcTL/fdAT frame structure of a conforming APNG. "
+        "Hash, Content-Type, and dimensions all match the declaration; the "
+        "only violation is animation. Per §03 animated image formats are "
+        "forbidden for every permitted media_type, and a client MUST detect "
+        "an APNG under image/png (acTL before the first IDAT) and reject it "
+        "as W_IMAGE_DECODE_FAILED. Rendering only the default image is "
+        "non-conformant.",
+        png=make_apng(2, 2), declared_w=2, declared_h=2,
+        outcome="W_IMAGE_DECODE_FAILED",
+    ))
+
+    out.append(image_vec(
+        "242-image-dimension-mismatch",
+        "Content document whose image block declares width 2 and height 2 "
+        "but is served a well-formed 4x4 PNG whose bytes match the declared "
+        "sha256. The container-header geometry differs from the declared "
+        "dimensions; per §03 the geometry check (pre-decode under the "
+        "resource-exhaustion gate, re-confirmed post-decode) rejects the "
+        "image as W_IMAGE_DIMENSIONS. The file itself is fully decodable, "
+        "so the dimension mismatch is the only live violation for both "
+        "gate-equipped and decode-then-check implementations.",
+        png=make_png(4, 4), declared_w=2, declared_h=2,
+        outcome="W_IMAGE_DIMENSIONS",
+    ))
+
+    out.append(image_vec(
+        "243-image-hash-mismatch",
+        "Content document whose image block declares a sha256 computed over "
+        "different bytes than the served image resource. The served file is "
+        "a well-formed 2x2 PNG with matching Content-Type and dimensions, "
+        "so the digest comparison (§03 step 5, before any decoding) is the "
+        "only live violation: W_IMAGE_HASH_MISMATCH.",
+        png=png_2x2, declared_w=2, declared_h=2,
+        declared_sha_of=b"ENTANGLED-different-image-bytes",
+        outcome="W_IMAGE_HASH_MISMATCH",
+    ))
+
+    out.append(image_vec(
+        "244-image-content-type-mismatch",
+        "Content document whose image block declares media_type image/png "
+        "but whose image-resource response carries Content-Type image/jpeg. "
+        "The body is a well-formed 2x2 PNG matching the declared sha256 and "
+        "dimensions, so the header-consistency comparison (§03 step 3) is "
+        "the only live violation: W_IMAGE_CONTENT_TYPE.",
+        png=png_2x2, declared_w=2, declared_h=2,
+        response_content_type="image/jpeg",
+        outcome="W_IMAGE_CONTENT_TYPE",
+    ))
+
+    garbage = b"ENTANGLED-not-a-png-resource-0001 " * 4
+    out.append(image_vec(
+        "245-image-decode-failed",
+        "Content document whose image block is served deterministic bytes "
+        "that are not a PNG at all (no PNG signature). The declared sha256 "
+        "matches the served bytes and the Content-Type matches the declared "
+        "media_type, so decoding (§03 step 6) is the only live violation: "
+        "W_IMAGE_DECODE_FAILED. Distinct from 241, which is structurally "
+        "valid PNG rejected for animation.",
+        png=garbage, declared_w=2, declared_h=2,
+        outcome="W_IMAGE_DECODE_FAILED",
+    ))
+
     return out
 
 
@@ -3832,7 +4063,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.51",
+        "rc_target": "1.0-rc.52",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,
