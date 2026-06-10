@@ -2733,7 +2733,7 @@ def negative_vectors(keys) -> list[dict]:
     # ---- 178-manifest-updated-future-skew (Stage 5, E_SCHEMA_FIELD_SYNTAX) ----
     # Manifest whose `updated` is set to 2026-05-07T00:07:00Z, six minutes
     # ahead of clock_now (2026-05-07T00:01:00Z), exceeding the 300-second
-    # future-skew tolerance defined in §10. Per §06:342 and §10:815, this
+    # future-skew tolerance defined in §10. Per §06:342 and §10:818, this
     # is rejected as E_SCHEMA_FIELD_SYNTAX with structured details
     # reason="future_beyond_skew_tolerance". Distinct from canary
     # issued_at future skew (vector 183, which yields E_CANARY_INVALID).
@@ -2749,7 +2749,7 @@ def negative_vectors(keys) -> list[dict]:
             "Manifest whose `updated` is set 6 minutes ahead of clock_now "
             "(2026-05-07T00:07:00Z vs 2026-05-07T00:01:00Z), exceeding "
             "the 300-second future-skew tolerance defined in §10. Per "
-            "§06:342 and §10:815, this is rejected as "
+            "§06:342 and §10:818, this is rejected as "
             "E_SCHEMA_FIELD_SYNTAX with structured details "
             "reason=future_beyond_skew_tolerance. The manifest is signed "
             "correctly and otherwise valid; the temporal-domain failure "
@@ -3130,7 +3130,7 @@ def negative_vectors(keys) -> list[dict]:
     # cycle. The announcing manifest at origin A (op_pub) carries a
     # migration_pointer to successor B (op_pub_2). The successor manifest
     # at B is signed correctly and binds correctly, but its own
-    # migration_pointer announces a return to A (op_pub). Per §10:436,
+    # migration_pointer announces a return to A (op_pub). Per §10:439,
     # the visited_origins set populated during a single migration
     # resolution flow forbids re-adopting an address already in the set;
     # B's announcement of A is therefore rejected as E_MIGRATION_INVALID
@@ -3179,7 +3179,7 @@ def negative_vectors(keys) -> list[dict]:
             "announcing manifest at origin A carries a migration_pointer "
             "to successor B (op_pub_2). The successor at B is signed "
             "correctly and binds correctly, but its own "
-            "migration_pointer announces a return to A. Per §10:436, "
+            "migration_pointer announces a return to A. Per §10:439, "
             "the per-flow visited_origins set forbids re-adopting an "
             "address already visited; B's announcement of A is rejected "
             "as E_MIGRATION_INVALID with details.reason='chain_cycle'. "
@@ -3333,7 +3333,7 @@ def negative_vectors(keys) -> list[dict]:
     # Announcing manifest A points to successor B. B fails its OWN pipeline
     # (origin.not_after in the past at clock_now -> E_ORIGIN_EXPIRED) AND
     # announces a migration_pointer back to A (a reverse A->B->A cycle). Per
-    # §10:398-405 the successor's own onward announcement (its second-hop
+    # §10:401-405 the successor's own onward announcement (its second-hop
     # chain_cycle) is processed only after B passes its full pipeline and the
     # publisher/binding continuity checks; a broken B therefore surfaces
     # E_MIGRATION_MISMATCH (mismatch_field=successor_stage9_failure, underlying
@@ -3384,7 +3384,7 @@ def negative_vectors(keys) -> list[dict]:
             "(extra_files/successor_manifest.json) fails its own Stage 9 with "
             "E_ORIGIN_EXPIRED (origin.not_after 2026-05-01 is past clock_now "
             "2026-05-07) AND carries a migration_pointer back to A (a reverse "
-            "A->B->A cycle). Per §10:398-405 the successor's onward announcement "
+            "A->B->A cycle). Per §10:401-405 the successor's onward announcement "
             "is processed only after the successor passes its full pipeline and "
             "the publisher/binding continuity checks, so a broken successor is "
             "reported as E_MIGRATION_MISMATCH (mismatch_field="
@@ -3520,7 +3520,7 @@ def negative_vectors(keys) -> list[dict]:
     # (§02:221-234); it is NOT a signed Entangled document. At Stage 9 the
     # client fetches and hash-checks the index against content_root, then
     # structurally validates it, then for the content document being rendered
-    # compares its seq against the index entry (§10:608-620): seq absent ->
+    # compares its seq against the index entry (§10:611-620): seq absent ->
     # E_CONTENT_SEQ_MISSING, seq < idx -> rollback, seq > idx -> uncommitted,
     # seq == idx with body hash != idx hash -> E_CONTENT_HASH_MISMATCH.
     #
@@ -3555,7 +3555,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "230-content-index-hash-mismatch",
         kind="manifest",
-        description="Manifest declaring a content_root whose SHA-256 does not match the exact bytes of the served content_index.json (provided in extra_files). The index is structurally valid, so the live failure is E_CONTENT_INDEX_HASH_MISMATCH (§10:598, §11:244), not E_CONTENT_INDEX_INVALID. Signed correctly by K_publisher; per §10:600 an index hash failure blocks rendering of all content under this manifest.",
+        description="Manifest declaring a content_root whose SHA-256 does not match the exact bytes of the served content_index.json (provided in extra_files). The index is structurally valid, so the live failure is E_CONTENT_INDEX_HASH_MISMATCH (§10:601, §11:244), not E_CONTENT_INDEX_INVALID. Signed correctly by K_publisher; per §10:603 an index hash failure blocks rendering of all content under this manifest.",
         spec_refs=["§06", "§09", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_INDEX_HASH_MISMATCH",
@@ -3585,7 +3585,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "231-content-index-invalid",
         kind="manifest",
-        description="Manifest whose content_root matches the served content_index.json bytes, but the index fails structural validation: an entry carries a field beyond the closed {seq, hash} entry schema (§02:229-234). The hash check passes, so the live failure is E_CONTENT_INDEX_INVALID (§10:598, §11:245), not E_CONTENT_INDEX_HASH_MISMATCH. Signed correctly by K_publisher.",
+        description="Manifest whose content_root matches the served content_index.json bytes, but the index fails structural validation: an entry carries a field beyond the closed {seq, hash} entry schema (§02:229-234). The hash check passes, so the live failure is E_CONTENT_INDEX_INVALID (§10:601, §11:245), not E_CONTENT_INDEX_HASH_MISMATCH. Signed correctly by K_publisher.",
         spec_refs=["§02", "§09", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_INDEX_INVALID",
@@ -3640,7 +3640,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "232-content-seq-missing",
         kind="content",
-        description="Content document at an indexed path that omits the seq field. The verified content index has an entry for this path, so per §02:194 and §10:616 seq is required; its absence is E_CONTENT_SEQ_MISSING. The document is otherwise well-formed and signed by K_runtime.",
+        description="Content document at an indexed path that omits the seq field. The verified content index has an entry for this path, so per §02:194 and §10:619 seq is required; its absence is E_CONTENT_SEQ_MISSING. The document is otherwise well-formed and signed by K_runtime.",
         spec_refs=["§02", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_SEQ_MISSING",
@@ -3652,7 +3652,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "233-content-seq-rollback",
         kind="content",
-        description="Content document whose seq (2) is strictly less than the seq (5) committed for this path in the verified content index. Per §10:617 a lower seq is E_CONTENT_SEQ_ROLLBACK, which blocks a K_runtime-only attacker from serving an older signed version. Signed by K_runtime.",
+        description="Content document whose seq (2) is strictly less than the seq (5) committed for this path in the verified content index. Per §10:620 a lower seq is E_CONTENT_SEQ_ROLLBACK, which blocks a K_runtime-only attacker from serving an older signed version. Signed by K_runtime.",
         spec_refs=["§02", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_SEQ_ROLLBACK",
@@ -3664,7 +3664,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "234-content-seq-uncommitted",
         kind="content",
-        description="Content document whose seq (9) is strictly greater than the seq (5) committed for this path in the verified content index. Per §10:618 a higher seq is E_CONTENT_SEQ_UNCOMMITTED, which blocks a K_runtime-only attacker from injecting a forged update at a higher sequence number than the publisher committed. Signed by K_runtime.",
+        description="Content document whose seq (9) is strictly greater than the seq (5) committed for this path in the verified content index. Per §10:621 a higher seq is E_CONTENT_SEQ_UNCOMMITTED, which blocks a K_runtime-only attacker from injecting a forged update at a higher sequence number than the publisher committed. Signed by K_runtime.",
         spec_refs=["§02", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_SEQ_UNCOMMITTED",
@@ -3676,7 +3676,7 @@ def negative_vectors(keys) -> list[dict]:
     out.append(vec(
         "235-content-hash-mismatch",
         kind="content",
-        description="Content document whose seq (5) equals the seq committed for this path in the verified content index, but whose response-body SHA-256 does not match the hash the index commits for that seq. Per §10:619 a body that does not match the committed digest at the committed seq is E_CONTENT_HASH_MISMATCH. The index hash is the digest of different body bytes than this document, so the seq matches while the hash does not. Signed by K_runtime.",
+        description="Content document whose seq (5) equals the seq committed for this path in the verified content index, but whose response-body SHA-256 does not match the hash the index commits for that seq. Per §10:622 a body that does not match the committed digest at the committed seq is E_CONTENT_HASH_MISMATCH. The index hash is the digest of different body bytes than this document, so the seq matches while the hash does not. Signed by K_runtime.",
         spec_refs=["§02", "§10", "§11"],
         verdict="reject",
         diagnostic="E_CONTENT_HASH_MISMATCH",
@@ -3772,7 +3772,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.48",
+        "rc_target": "1.0-rc.49",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,
