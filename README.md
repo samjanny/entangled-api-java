@@ -1,14 +1,14 @@
 # entangled-api-java
 
 [![CI](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml/badge.svg)](https://github.com/samjanny/entangled-api-java/actions/workflows/ci.yml)
-[![Conformance](https://img.shields.io/badge/corpus-108%2F108-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
-[![Spec](https://img.shields.io/badge/spec-v1.0--rc.56-blue)](https://github.com/samjanny/entangled)
+[![Conformance](https://img.shields.io/badge/corpus-109%2F109-brightgreen)](src/test/java/org/entangled/ConformanceTest.java)
+[![Spec](https://img.shields.io/badge/spec-v1.0--rc.57-blue)](https://github.com/samjanny/entangled)
 [![Java](https://img.shields.io/badge/Java-21-orange)](pom.xml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
 A Java reference implementation of the **Entangled v1.0** protocol,
 built from the specification at
-[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.56`
+[`samjanny/entangled`](https://github.com/samjanny/entangled) tag `v1.0-rc.57`
 (its `specs/`, `docs/`, and `corpus/`).
 
 ## Usage
@@ -69,18 +69,18 @@ runnable tests.
 
 ## Status
 
-Passes the conformance corpus at `v1.0-rc.56` (**139 vectors**): **108 / 108**
+Passes the conformance corpus at `v1.0-rc.57` (**140 vectors**): **109 / 109**
 in-scope vectors match the recorded verdict, diagnostic code, and structured
 `details` byte-identically.
 
-> Note on vector count: the corpus at `v1.0-rc.56` contains **139** vectors
-> (`corpus.json` `rc_target: 1.0-rc.56`). Thirty-one of them exercise layers
+> Note on vector count: the corpus at `v1.0-rc.57` contains **140** vectors
+> (`corpus.json` `rc_target: 1.0-rc.57`). Thirty-one of them exercise layers
 > that are out of scope for this verifier (see Scope): the Stage 7 trust-state
 > machine (`210`, `211`, `215`), the section 03 image resource layer
 > (`240`-`245`, `269`), and the Stage 1 transport layer (`250`-`268`, `270`,
 > `271`). They are listed in an explicit out-of-scope set in `ConformanceTest`
-> and reported with a printed count rather than counted as failures, so 108 of
-> the 139 vectors run and all 108 pass.
+> and reported with a printed count rather than counted as failures, so 109 of
+> the 140 vectors run and all 109 pass.
 
 ## Scope
 
@@ -132,7 +132,7 @@ Requires JDK 21 and Maven. The conformance corpus is checked in under
 
 ```sh
 export JAVA_HOME=/path/to/jdk-21
-mvn test                          # all unit tests + the conformance suite (108 in-scope vectors)
+mvn test                          # all unit tests + the conformance suite (109 in-scope vectors)
 mvn test -Dtest=ConformanceTest   # the code-vs-corpus conformance suite only
 ```
 
@@ -178,7 +178,7 @@ src/main/java/org/entangled/
   schema/      closed-schema field/block/document validators (Stage 5)
   pipeline/    the 10-stage validation pipeline and per-stage logic
 src/test/java/org/entangled/
-  ConformanceTest    drives all 139 corpus vectors (108 in scope)
+  ConformanceTest    drives all 140 corpus vectors (109 in scope)
   unit tests for the JSON, JCS, crypto, and schema layers
 src/test/resources/corpus/    the spec conformance corpus, verbatim
 ```
