@@ -98,7 +98,7 @@ public final class DiffEval {
         } catch (RejectException e) {
             // A probe-stage rejection (Stage 2 byte/UTF-8/BOM, Stage 3 parse,
             // Stage 4 kind) is itself the verdict.
-            return "R:" + e.diagnostic().code().name();
+            return reject(e.diagnostic().code());
         } catch (Throwable t) {
             // Any other throwable (e.g. a StackOverflowError on deep nesting, or
             // an implementation bug) is a distinct outcome; surfacing it as its
@@ -123,7 +123,16 @@ public final class DiffEval {
         if (v.isAccepted()) {
             return "A";
         }
-        return "R:" + v.diagnostic().code().name();
+        return reject(v.diagnostic().code());
+    }
+
+    /**
+     * Encode a rejection as {@code R:<CODE>:<STAGE>}. The stage lets the Rust
+     * conformance check separate within-stage code latitude (allowed, section 11)
+     * from a cross-stage first-failing-stage violation.
+     */
+    private static String reject(org.entangled.DiagnosticCode code) {
+        return "R:" + code.name() + ":" + code.stage();
     }
 
     /** UTF-8 bytes of a verdict string, for the wire protocol. */
