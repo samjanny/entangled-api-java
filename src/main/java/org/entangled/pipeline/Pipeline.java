@@ -43,15 +43,20 @@ public final class Pipeline {
         this.ctx = ctx;
     }
 
-    /** Run the pipeline on the raw document bytes. */
+    /**
+     * Run the pipeline on the raw document bytes.
+     *
+     * @throws IllegalStateException when mandatory trusted context is missing,
+     *                               malformed, or inconsistent with the document
+     */
     public Verdict run(byte[] body) {
         try {
             // Stage 2: the byte cap is document-kind specific and is enforced
             // before parsing (section 10 Stage 2). The expected kind comes from
             // the fetch context (a real client knows it fetched /manifest.json,
             // a content path, or a submit response); the corpus supplies it as
-            // the vector's kind. When unknown, fall back to the most permissive
-            // 1 MiB cap so UTF-8/BOM are still checked before parse.
+            // the vector's kind. It is security-critical input: without it the
+            // implementation cannot enforce the pre-parse, kind-specific cap.
             int cap = capForExpectedKind();
             String text = Stage2Input.validateAndDecode(body, cap);
 
@@ -60,6 +65,10 @@ public final class Pipeline {
 
             // Stage 4: kind discrimination.
             Stage4Kind.Kind kind = Stage4Kind.discriminate(root);
+            if (kind != ctx.expectedKind) {
+                throw new IllegalStateException(
+                        "document kind " + kind + " does not match expected kind " + ctx.expectedKind);
+            }
             JsonValue.Obj doc = (JsonValue.Obj) root;
 
             switch (kind) {
@@ -75,7 +84,7 @@ public final class Pipeline {
 
     private int capForExpectedKind() {
         if (ctx.expectedKind == null) {
-            return Stage2Input.CONTENT_BYTE_CAP;
+            throw new IllegalStateException("Context.expectedKind is required");
         }
         return switch (ctx.expectedKind) {
             case MANIFEST -> Stage2Input.MANIFEST_BYTE_CAP;
@@ -140,6 +149,11 @@ public final class Pipeline {
         // declared in its state_policy (E_STATE_UNDECLARED). The standalone Stage 5
         // form/range checks above do not need the manifest; this half does.
         JsonValue.Arr statePolicy = pinnedStatePolicy();
+        JsonValue.Arr stateUpdates = (JsonValue.Arr) doc.get("state_updates");
+        if (statePolicy == null && !stateUpdates.elements().isEmpty()) {
+            throw new IllegalStateException(
+                    "Context.publisherHistory is required for transaction state_updates");
+        }
         if (statePolicy != null) {
             DocumentSchema.checkStateUpdatesDeclared(doc, statePolicy);
         }
@@ -151,7 +165,8 @@ public final class Pipeline {
     /**
      * The {@code state_policy} of the manifest under which the current document
      * is verified, taken from the most recent entry in the seeded publisher
-     * history, or null when no manifest is available. The history bytes were
+     * history, or null when no manifest is available. A verified manifest with
+     * no {@code state_policy} declares an empty policy. The history bytes were
      * already verified when seeded; here we only re-read the declared policy.
      */
     private JsonValue.Arr pinnedStatePolicy() {
@@ -160,11 +175,14 @@ public final class Pipeline {
         }
         byte[] manifestBytes = ctx.publisherHistory.get(ctx.publisherHistory.size() - 1);
         JsonValue parsed = JsonParser.parse(new String(manifestBytes, StandardCharsets.UTF_8));
-        if (parsed instanceof JsonValue.Obj manifest
-                && manifest.get("state_policy") instanceof JsonValue.Arr policy) {
+        if (!(parsed instanceof JsonValue.Obj manifest)) {
+            throw new IllegalStateException(
+                    "Context.publisherHistory must contain verified manifest objects");
+        }
+        if (manifest.get("state_policy") instanceof JsonValue.Arr policy) {
             return policy;
         }
-        return null;
+        return new JsonValue.Arr(java.util.List.of());
     }
 
     private byte[] runtimeKeyOrInvalid() {

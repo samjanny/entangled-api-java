@@ -6,16 +6,24 @@ on:
   pull_request:
     branches: ["**"]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build and test (JDK 21)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: "21"
@@ -25,8 +33,7 @@ jobs:
         run: mvn -B test
 
       - name: Verify implementation against the corpus (conformance)
-        # Runs the conformance suite that drives all 74 corpus vectors through
-        # the validation pipeline and asserts each verdict, diagnostic code, and
-        # structured details against corpus.json. This is the code-vs-corpus
-        # check: the build fails if the implementation diverges from any vector.
+        # Drives all 140 vectors, including the 109 in-scope verifier vectors,
+        # and asserts each in-scope verdict, diagnostic code, and structured
+        # details against corpus.json.
         run: mvn -B test -Dtest=ConformanceTest

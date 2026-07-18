@@ -1,6 +1,9 @@
 package org.entangled.pipeline;
 
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -12,6 +15,7 @@ import org.entangled.crypto.Sha;
 import org.entangled.json.JsonParser;
 import org.entangled.json.JsonValue;
 import org.entangled.schema.Fields;
+import org.entangled.schema.Paths;
 
 /**
  * Stage 9b: content index and content sequencing (section 02, section 06,
@@ -109,20 +113,20 @@ public final class Stage9ContentIndex {
      */
     private static Map<String, IndexEntry> parseVerifiedIndex(String contentRoot, byte[] indexBytes) {
         byte[] rootBytes = decodeSha256(contentRoot, DiagnosticCode.E_CONTENT_INDEX_INVALID);
-        if (!Arrays.equals(Sha.sha256(indexBytes), rootBytes)) {
-            throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_HASH_MISMATCH);
-        }
         if (indexBytes.length > INDEX_MAX_BYTES) {
             throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_INVALID);
         }
-        return parseIndexStructure(indexBytes);
+        if (!Arrays.equals(Sha.sha256(indexBytes), rootBytes)) {
+            throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_HASH_MISMATCH);
+        }
+        return parseIndexStructure(decodeStrictUtf8(indexBytes));
     }
 
     /** Parse and structurally validate the closed index schema. */
-    private static Map<String, IndexEntry> parseIndexStructure(byte[] indexBytes) {
+    private static Map<String, IndexEntry> parseIndexStructure(String indexText) {
         JsonValue parsed;
         try {
-            parsed = JsonParser.parse(new String(indexBytes, StandardCharsets.UTF_8));
+            parsed = JsonParser.parse(indexText);
         } catch (RuntimeException e) {
             throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_INVALID);
         }
@@ -133,7 +137,8 @@ public final class Stage9ContentIndex {
         }
         Map<String, IndexEntry> out = new LinkedHashMap<>();
         for (Map.Entry<String, JsonValue> e : entriesObj.members().entrySet()) {
-            if (!(e.getValue() instanceof JsonValue.Obj entry)
+            if (!Paths.isValidContentPath(e.getKey())
+                    || !(e.getValue() instanceof JsonValue.Obj entry)
                     || entry.members().size() != 2
                     || !(entry.get("seq") instanceof JsonValue.Num)
                     || !(entry.get("hash") instanceof JsonValue.Str hashStr)) {
@@ -147,6 +152,25 @@ public final class Stage9ContentIndex {
             out.put(e.getKey(), new IndexEntry(seq.longValueExact(), hash, hashStr.value()));
         }
         return out;
+    }
+
+    /** Decode index bytes as strict UTF-8 and reject a leading UTF-8 BOM. */
+    private static String decodeStrictUtf8(byte[] bytes) {
+        if (bytes.length >= 3
+                && (bytes[0] & 0xff) == 0xef
+                && (bytes[1] & 0xff) == 0xbb
+                && (bytes[2] & 0xff) == 0xbf) {
+            throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_INVALID);
+        }
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException e) {
+            throw new RejectException(DiagnosticCode.E_CONTENT_INDEX_INVALID);
+        }
     }
 
     /** Decode a {@code sha-256:<base64url>} field to its 32 raw bytes. */

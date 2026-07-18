@@ -13,9 +13,11 @@ import java.util.List;
  * history (prior verified manifests) for anti-downgrade / canary-conflict /
  * runtime-reuse, and the successor manifest material for migration scenarios.
  *
- * <p>The pipeline reads only what each document kind needs; absent fields are
- * left null and the corresponding stage adapts (for example, a content document
- * with no fetched path cannot run Stage 9 path binding).
+ * <p>The pipeline reads only what each document kind needs. Security-critical
+ * binding fields are mandatory: {@link #expectedKind} for every run,
+ * {@link #fetchedOriginAddress} for a manifest, {@link #fetchedPath} for
+ * content, and {@link #submitPath}/{@link #submitBody} for a transaction.
+ * Missing mandatory context is a caller error and fails closed.
  */
 public final class Context {
 
@@ -28,14 +30,15 @@ public final class Context {
      * response). This selects the Stage 2 byte cap, which the spec enforces
      * before parsing (section 10 Stage 2): a manifest is capped at 64 KiB,
      * content/transaction at 1 MiB. A real client knows this from which endpoint
-     * it fetched; the corpus supplies it as the vector's {@code kind}.
+     * it fetched; the corpus supplies it as the vector's {@code kind}. Required
+     * for every pipeline run.
      */
     public Stage4Kind.Kind expectedKind;
 
-    /** Carrier origin address a manifest was fetched from (Stage 9 origin binding). */
+    /** Required carrier origin address a manifest was fetched from (Stage 9 origin binding). */
     public String fetchedOriginAddress;
 
-    /** Path a content document was fetched from (Stage 9 path binding). */
+    /** Required path a content document was fetched from (Stage 9 path binding). */
     public String fetchedPath;
 
     /**
@@ -45,13 +48,17 @@ public final class Context {
      */
     public String expectedRuntimePubkey;
 
-    /** Path a submit was sent to (Stage 9 transaction in_response_to binding). */
+    /** Required path a submit was sent to (Stage 9 transaction in_response_to binding). */
     public String submitPath;
 
-    /** Exact bytes of the submit body the client sent (Stage 9 request_hash / request_id binding). */
+    /** Required exact bytes of the submit body sent (Stage 9 request_hash / request_id binding). */
     public byte[] submitBody;
 
-    /** Prior verified manifests for the same publisher, oldest first (publisher history seed). */
+    /**
+     * Prior verified manifests for the same publisher, oldest first. Required
+     * when a transaction carries non-empty state_updates, and used for
+     * anti-downgrade, canary-conflict, and runtime-reuse checks.
+     */
     public final List<byte[]> publisherHistory = new ArrayList<>();
 
     /** Successor manifest bytes for a migration scenario (Stage 9 successor verification). */

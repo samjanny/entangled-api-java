@@ -54,12 +54,20 @@ Verdict verdict = new Pipeline(ctx).run(contentBytes);
 `Context` carries the rest of what a real client holds when it matters: the
 submit path and body for transaction binding (`submitPath`, `submitBody`), prior
 verified manifests for anti-downgrade and canary checks (`publisherHistory`), and
-the successor manifest for migration scenarios (`successorManifest`). Fields left
-unset simply skip the checks that depend on them.
+the successor manifest for migration scenarios (`successorManifest`). Binding
+context is mandatory and fails closed when absent: `expectedKind` on every run,
+`fetchedOriginAddress` for manifests, `fetchedPath` for content, and both
+`submitPath` and `submitBody` for transactions. Optional history, migration, and
+content-index material is evaluated when the corresponding protocol feature
+applies; publisher history is required when a transaction carries non-empty
+`state_updates`.
 
-Outcomes are exhaustive and machine-readable: `Verdict.isAccepted()`, and on a
-rejection `verdict.diagnostic().code()` (a `DiagnosticCode` enum value carrying
-its severity and pipeline stage) plus `verdict.diagnostic().details()`.
+With a complete, internally consistent `Context`, outcomes are exhaustive and
+machine-readable: `Verdict.isAccepted()`, and on a rejection
+`verdict.diagnostic().code()` (a `DiagnosticCode` enum value carrying its
+severity and pipeline stage) plus `verdict.diagnostic().details()`. Missing or
+inconsistent mandatory trusted context throws `IllegalStateException` instead
+of returning a potentially accepting verdict.
 
 There are no runtime dependencies; add the built jar to your classpath. Requires
 Java 21 at runtime.

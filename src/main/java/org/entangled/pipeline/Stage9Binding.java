@@ -66,7 +66,8 @@ public final class Stage9Binding {
             throw new RejectException(DiagnosticCode.E_BIND_ORIGIN);
         }
         if (fetchedAddress == null) {
-            return; // no fetched origin supplied; address binding not evaluated
+            throw new IllegalStateException(
+                    "Context.fetchedOriginAddress is required for manifest verification");
         }
         String declaredAddress = ((JsonValue.Str) origin.get("address")).value();
         // Fetched address must equal the declared address (canonical form).
@@ -129,6 +130,7 @@ public final class Stage9Binding {
 
         // Run the successor manifest through the full pipeline in isolation.
         Context successorCtx = new Context(ctx.nowEpoch);
+        successorCtx.expectedKind = Stage4Kind.Kind.MANIFEST;
         successorCtx.fetchedOriginAddress = successorAddress;
         // The successor manifest is attacker-controlled (fetched from the
         // announced successor onion address). It is parsed here so the
@@ -211,7 +213,8 @@ public final class Stage9Binding {
 
     static void contentPath(JsonValue.Obj doc, Context ctx) {
         if (ctx.fetchedPath == null) {
-            return;
+            throw new IllegalStateException(
+                    "Context.fetchedPath is required for content verification");
         }
         String declared = ((JsonValue.Str) doc.get("path")).value();
         if (!declared.equals(ctx.fetchedPath)) {
@@ -220,33 +223,37 @@ public final class Stage9Binding {
     }
 
     static void transaction(JsonValue.Obj doc, Context ctx) {
-        if (ctx.submitPath != null) {
-            String inResponseTo = ((JsonValue.Str) doc.get("in_response_to")).value();
-            if (!inResponseTo.equals(ctx.submitPath)) {
-                throw new RejectException(DiagnosticCode.E_BIND_RESPONSE_PATH);
-            }
+        if (ctx.submitPath == null) {
+            throw new IllegalStateException(
+                    "Context.submitPath is required for transaction verification");
         }
-        if (ctx.submitBody != null) {
-            JsonValue.Obj submitParsed =
-                    (JsonValue.Obj) JsonParser.parse(new String(ctx.submitBody, StandardCharsets.UTF_8));
+        if (ctx.submitBody == null) {
+            throw new IllegalStateException(
+                    "Context.submitBody is required for transaction verification");
+        }
+        String inResponseTo = ((JsonValue.Str) doc.get("in_response_to")).value();
+        if (!inResponseTo.equals(ctx.submitPath)) {
+            throw new RejectException(DiagnosticCode.E_BIND_RESPONSE_PATH);
+        }
+        JsonValue.Obj submitParsed =
+                (JsonValue.Obj) JsonParser.parse(new String(ctx.submitBody, StandardCharsets.UTF_8));
 
-            // request_id: the transaction's request_id MUST equal the request_id
-            // the client placed in the submit body (section 02:298, section
-            // 09:139). The transaction's request_id is an independent copied
-            // field, so this is checked separately from request_hash.
-            String declaredRequestId = ((JsonValue.Str) doc.get("request_id")).value();
-            String submitRequestId = ((JsonValue.Str) submitParsed.get("request_id")).value();
-            if (!declaredRequestId.equals(submitRequestId)) {
-                throw new RejectException(DiagnosticCode.E_BIND_REQUEST_ID);
-            }
+        // request_id: the transaction's request_id MUST equal the request_id
+        // the client placed in the submit body (section 02:298, section
+        // 09:139). The transaction's request_id is an independent copied
+        // field, so this is checked separately from request_hash.
+        String declaredRequestId = ((JsonValue.Str) doc.get("request_id")).value();
+        String submitRequestId = ((JsonValue.Str) submitParsed.get("request_id")).value();
+        if (!declaredRequestId.equals(submitRequestId)) {
+            throw new RejectException(DiagnosticCode.E_BIND_REQUEST_ID);
+        }
 
-            // request_hash = "sha-256:" || base64url(SHA-256(JCS(submit_body))).
-            byte[] canonical = Jcs.canonicalize(submitParsed);
-            String expectedHash = "sha-256:" + base64urlNoPad(Sha.sha256(canonical));
-            String declaredHash = ((JsonValue.Str) doc.get("request_hash")).value();
-            if (!declaredHash.equals(expectedHash)) {
-                throw new RejectException(DiagnosticCode.E_BIND_REQUEST_HASH);
-            }
+        // request_hash = "sha-256:" || base64url(SHA-256(JCS(submit_body))).
+        byte[] canonical = Jcs.canonicalize(submitParsed);
+        String expectedHash = "sha-256:" + base64urlNoPad(Sha.sha256(canonical));
+        String declaredHash = ((JsonValue.Str) doc.get("request_hash")).value();
+        if (!declaredHash.equals(expectedHash)) {
+            throw new RejectException(DiagnosticCode.E_BIND_REQUEST_HASH);
         }
     }
 
