@@ -23,8 +23,8 @@ import org.junit.jupiter.api.TestFactory;
  * The normative conformance suite (corpus/README.md): drive every corpus vector
  * through the validation pipeline and assert the implementation's outcome
  * against the recorded {@code expected} verdict, diagnostic code, and structured
- * details. This is the code-vs-corpus verification; success is 109/109 driven
- * (140 vectors, 31 out of scope for this library).
+ * details. This is the code-vs-corpus verification; success is 112/112 driven
+ * (144 vectors, 32 out of scope for this library).
  *
  * <p>The clock is mocked to {@code corpus.json.clock_now}. Each vector's
  * {@code context} block is mapped onto a {@link Context}: fetched origin/path,
@@ -52,8 +52,8 @@ class ConformanceTest {
      * Vectors that exercise functionality this library documents as out of scope:
      * the section 10 Stage 7 trust-state machine, the section 03 image
      * resource layer (fetching, decoding, and the per-image W_IMAGE_* outcomes),
-     * and the Stage 1 transport layer (the rc.54 family 250-269, whose vectors
-     * carry HTTP response metadata in {@code context.transport_response} /
+     * and the Stage 1 transport layer (017 and the rc.54 family 250-269, whose
+     * vectors carry HTTP response metadata in {@code context.transport_response} /
      * {@code context.content_index_response} and are exercised by mock-response
      * harnesses in implementations that own a fetch surface). All of these
      * belong to a client built on top of this verifier. Like the Rust
@@ -68,6 +68,7 @@ class ConformanceTest {
      * exercised by the entangled-client corpus harness.
      */
     private static final java.util.Map<String, String> OUT_OF_SCOPE = java.util.Map.ofEntries(
+            java.util.Map.entry("017-transport-content-type-case-insensitive", TRANSPORT_REASON),
             java.util.Map.entry("210-trust-publisher-key-mismatch", TRUST_REASON),
             java.util.Map.entry("211-trust-user-rejected-new-identity", TRUST_REASON),
             java.util.Map.entry("215-trust-observed-mismatch", TRUST_REASON),

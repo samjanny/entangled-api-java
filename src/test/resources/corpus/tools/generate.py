@@ -918,6 +918,41 @@ def positive_vectors(keys) -> list[dict]:
         context={"fetched_origin_address": m_interval_min["origin"]["address"]},
     ))
 
+    # ---- 017-content-type-case-insensitive (RFC 9110 accept) ----
+    m_content_type_case = make_manifest(
+        publisher_priv=pp, publisher_pub=pp_pub,
+        origin_pub=op_pub, runtime_pub=rp_pub,
+    )
+    m_content_type_case_bytes = json.dumps(
+        m_content_type_case, separators=(",", ":"),
+        ensure_ascii=False).encode("utf-8")
+    out.append(vec(
+        "017-transport-content-type-case-insensitive",
+        kind="manifest",
+        description=(
+            "Manifest fetch answered 200 with mixed-case Content-Type "
+            "Application/Vnd.Entangled+JSON and an empty parsed parameter "
+            "list. RFC 9110 makes type and subtype tokens case-insensitive; "
+            "§09 therefore requires accept even though conforming publishers "
+            "emit the lowercase spelling. Content-Length and the signed "
+            "manifest body are valid, so the header spelling is the only "
+            "variation from the transport baseline."
+        ),
+        spec_refs=["§09"],
+        verdict="accept",
+        body=m_content_type_case_bytes,
+        context={
+            "fetched_origin_address": m_content_type_case["origin"]["address"],
+            "transport_response": {
+                "status": 200,
+                "headers": {
+                    "Content-Type": "Application/Vnd.Entangled+JSON",
+                    "Content-Length": str(len(m_content_type_case_bytes)),
+                },
+            },
+        },
+    ))
+
     return out
 
 
@@ -4174,7 +4209,7 @@ def negative_vectors(keys) -> list[dict]:
     ))
 
     # =====================================================================
-    # 250-269: Stage 1 transport (§09 wire profile, §11 transport codes).
+    # 250-271: Stage 1 transport (§09 wire profile, §11 transport codes).
     #
     # Each vector supplies the HTTP response metadata of the primary fetch
     # in context.transport_response: `status` (integer), `headers` (object;
@@ -4183,9 +4218,10 @@ def negative_vectors(keys) -> list[dict]:
     # set to "failed" when the transport reported a body-retrieval failure
     # (timeout, reset, early close) after delivering the input bytes, which
     # are then a partial prefix and MUST NOT be presented as a complete
-    # body. When transport_response is absent (every vector outside this
-    # family), the harness presents the input as a clean 200 fetch with
-    # exact Content-Type and Content-Length, which is what the rest of the
+    # body. When transport_response is absent, the harness presents the
+    # input as a clean 200 fetch with
+    # lowercase, parameter-free Content-Type and exact Content-Length,
+    # which is what the rest of the
     # corpus has always assumed.
     #
     # Every response body in this family is a fully valid document, so the
@@ -4206,7 +4242,7 @@ def negative_vectors(keys) -> list[dict]:
     m_t_bytes = json.dumps(
         m_t, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     h_doc_ok = {
-        "Content-Type": "application/entangled+json",
+        "Content-Type": "application/vnd.entangled+json",
         "Content-Length": str(len(m_t_bytes)),
     }
 
@@ -4236,8 +4272,9 @@ def negative_vectors(keys) -> list[dict]:
     # ---- 250: accept baseline; ignored response headers have no effect ----
     out.append(transport_vec(
         "250-transport-accept-ignored-headers",
-        "Manifest fetch answered 200 with exact Content-Type and "
-        "Content-Length and a valid manifest body, plus response headers "
+        "Manifest fetch answered 200 with the lowercase, parameter-free "
+        "Content-Type and Content-Length and a valid manifest body, plus "
+        "response headers "
         "the client MUST ignore (§09:377-389): Set-Cookie, Cache-Control, "
         "ETag, Server, and a custom X- header. The verdict is accept and "
         "the ignored headers have no effect on client state; an "
@@ -4316,15 +4353,15 @@ def negative_vectors(keys) -> list[dict]:
     out.append(transport_vec(
         "255-transport-content-type-parameter",
         "Manifest fetch answered 200 with Content-Type "
-        "application/entangled+json; charset=utf-8. Per §09:393-408 the "
-        "required value is exact with no parameters; a charset parameter "
+        "application/vnd.entangled+json; charset=utf-8. Per §09 the "
+        "parsed parameter list must be empty; a charset parameter "
         "is redundant (Entangled JSON is always UTF-8) and rejected as "
-        "E_TRANSPORT_CONTENT_TYPE. This pins the exact-match rule against "
-        "implementations that compare the media-type essence after "
-        "parameter stripping, which would wrongly accept.",
+        "E_TRANSPORT_CONTENT_TYPE. Parameter rejection occurs after RFC "
+        "9110 parsing and does not depend on optional whitespace after the "
+        "semicolon; stripping parameters and accepting would diverge.",
         status=200,
         headers={
-            "Content-Type": "application/entangled+json; charset=utf-8",
+            "Content-Type": "application/vnd.entangled+json; charset=utf-8",
             "Content-Length": str(len(m_t_bytes)),
         },
         diagnostic="E_TRANSPORT_CONTENT_TYPE",
@@ -4339,7 +4376,7 @@ def negative_vectors(keys) -> list[dict]:
         "E_TRANSPORT_CONTENT_LENGTH (§11:100). The body is a fully valid "
         "manifest, so the missing header is the only live violation.",
         status=200,
-        headers={"Content-Type": "application/entangled+json"},
+        headers={"Content-Type": "application/vnd.entangled+json"},
         diagnostic="E_TRANSPORT_CONTENT_LENGTH",
     ))
     out.append(transport_vec(
@@ -4353,7 +4390,7 @@ def negative_vectors(keys) -> list[dict]:
         "this from the transport-failure condition of 258.",
         status=200,
         headers={
-            "Content-Type": "application/entangled+json",
+            "Content-Type": "application/vnd.entangled+json",
             "Content-Length": str(len(m_t_bytes) + 7),
         },
         diagnostic="E_TRANSPORT_CONTENT_LENGTH",
@@ -4479,7 +4516,7 @@ def negative_vectors(keys) -> list[dict]:
                 "transport_response": {
                     "status": status,
                     "headers": {
-                        "Content-Type": "application/entangled+json",
+                        "Content-Type": "application/vnd.entangled+json",
                         "Content-Length": str(len(t_t_bytes)),
                     },
                 },
@@ -4734,7 +4771,7 @@ def main() -> int:
     corpus = {
         "_comment": "Generated by corpus/tools/generate.py. Do not hand-edit.",
         "spec_version_target": "1.0",
-        "rc_target": "1.0-rc.63",
+        "rc_target": "1.0-rc.64",
         "keys": "keys.json",
         "clock_now": "2026-05-07T00:01:00Z",
         "vectors": vectors,
