@@ -31,15 +31,19 @@ class Stage5StateUpdateTest {
     // checks its syntax, not that it matches any submit body.
     private static final String RHASH = "sha-256:-EvECkoil9nNYYBfRQE85W5pWojAP0K9UG830mtQn0M";
 
-    private static String txWithSet(String value, long ttl) {
+    private static String txWithUpdates(String updates) {
         return "{\"spec_version\":\"1.0\",\"kind\":\"transaction\",\"in_response_to\":\"/c\","
                 + "\"request_id\":\"AAECAwQFBgcICQoLDA0ODw\","
                 + "\"request_hash\":\"" + RHASH + "\","
-                + "\"state_updates\":[{\"op\":\"set\",\"namespace\":\"session\",\"key\":\"data\","
-                + "\"value\":\"" + value + "\",\"ttl\":" + ttl + "}],"
+                + "\"state_updates\":" + updates + ","
                 + "\"blocks\":[{\"kind\":\"feedback\",\"variant\":\"success\","
                 + "\"content\":[{\"kind\":\"text\",\"value\":\"ok\",\"marks\":[]}]}],"
                 + "\"sig\":\"" + SIG + "\"}";
+    }
+
+    private static String txWithSet(String value, long ttl) {
+        return txWithUpdates("[{\"op\":\"set\",\"namespace\":\"session\",\"key\":\"data\","
+                + "\"value\":\"" + value + "\",\"ttl\":" + ttl + "}]");
     }
 
     private static DiagnosticCode rejectCode(String json) {
@@ -81,5 +85,18 @@ class Stage5StateUpdateTest {
         acceptsSchema(txWithSet("X".repeat(4096), 86400));
         acceptsSchema(txWithSet("x", 300));
         acceptsSchema(txWithSet("x", 7776000));
+    }
+
+    @Test
+    void duplicateNamespaceKeyRejectedRegardlessOfOperationForm() {
+        String updates = "[{\"op\":\"set\",\"namespace\":\"session\",\"key\":\"data\","
+                + "\"value\":\"ok\",\"ttl\":86400},"
+                + "{\"op\":\"delete\",\"namespace\":\"session\",\"key\":\"data\"}]";
+        JsonValue.Obj doc = (JsonValue.Obj) JsonParser.parse(txWithUpdates(updates));
+        RejectException ex = assertThrows(RejectException.class,
+                () -> DocumentSchema.validateTransaction(doc));
+        assertEquals(DiagnosticCode.E_STATE_DUPLICATE, ex.diagnostic().code());
+        assertEquals("session", ex.diagnostic().details().get("duplicate_namespace"));
+        assertEquals("data", ex.diagnostic().details().get("duplicate_key"));
     }
 }

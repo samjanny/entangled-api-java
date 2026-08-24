@@ -418,6 +418,7 @@ public final class DocumentSchema {
         if (list.size() > 32) {
             throw new RejectException(DiagnosticCode.E_SCHEMA_FIELD_LENGTH);
         }
+        Set<String> seen = new java.util.HashSet<>();
         for (JsonValue u : list) {
             JsonValue.Obj op = Fields.obj(u);
             String opName = Fields.str(Inline.require(op, "op"));
@@ -450,6 +451,15 @@ public final class DocumentSchema {
                     Fields.slug(Fields.str(op.get("key")), 64);
                 }
                 default -> throw new RejectException(DiagnosticCode.E_SCHEMA_ENUM_VIOLATION);
+            }
+            String namespace = Fields.str(op.get("namespace"));
+            String key = Fields.str(op.get("key"));
+            String composite = namespace + "\u0000" + key;
+            if (!seen.add(composite)) {
+                Map<String, Object> details = new LinkedHashMap<>();
+                details.put("duplicate_namespace", namespace);
+                details.put("duplicate_key", key);
+                throw new RejectException(DiagnosticCode.E_STATE_DUPLICATE, details);
             }
         }
     }
