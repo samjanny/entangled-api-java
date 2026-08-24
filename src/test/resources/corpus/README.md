@@ -71,20 +71,23 @@ Implementations SHOULD report any vector whose actual outcome diverges from the 
 
 ## Regenerating
 
-```
+```sh
+python3 -m pip install -r corpus/tools/requirements.txt
 python3 corpus/tools/generate.py
 ```
 
-Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 signing). The generator is fully deterministic; output bytes match across runs and across machines.
+Requires Python 3.10+ and the pinned `cryptography` package (for raw Ed25519
+RFC 8032 signing). The generator is fully deterministic; output bytes match
+across runs and across machines.
 
 ## Categories of vectors
 
 | Range | Category |
 |---|---|
-| 001-099 | Positive (must be accepted): 001-007 minimal baselines, 010 a fuller manifest (state_policy + origin.not_after + navigation together), 011 a valid transaction with set and delete state updates, 012 a successfully adopted migration, and 013-016 the inclusive-limit accepts pinned at their exact boundary (state ttl 7776000, state value 4096 bytes, origin.not_after at the 5-year ceiling, canary interval at the 7-day minimum), each paired with the one-past-the-limit reject (149, 148, 177, 182) |
+| 001-099 | Positive (must be accepted): 001-007 minimal baselines, 010 a fuller manifest (state_policy + origin.not_after + navigation together), 011 a valid transaction with set and delete state updates, 012 a successfully adopted migration whose successor Stage 8 checks use AMB-32 provisional history isolated from the announcing manifest and global publisher history, and 013-016 the inclusive-limit accepts pinned at their exact boundary (state ttl 7776000, state value 4096 bytes, origin.not_after at the 5-year ceiling, canary interval at the 7-day minimum), each paired with the one-past-the-limit reject (149, 148, 177, 182) |
 | 100-109 | Stage 2 input checks (BOM, UTF-8, byte cap) |
 | 110-119 | Stage 3 JSON parsing (duplicate keys, nesting depth, string length, array length, object keys, malformed JSON; and the Stage-3-limit-vs-numeric-grammar precedence vectors 117/118, where a structural limit co-occurs with a non-integer token and the Stage 3 limit code wins) |
-| 120-129 | Stage 4 kind discrimination (spec_version, unknown kind, missing required top-level field) |
+| 120-129 | Stage 4 kind discrimination (spec_version, unknown kind, missing required top-level field), and the nested enum-discriminator type rule (vector 129: a block/inline/op `kind` or `op` discriminator that is not a string is a Stage 5 `E_SCHEMA_FIELD_TYPE`, reported before signature verification) |
 | 130-139 | Stage 5 schema (unknown field, missing required, null literal, unknown block kind, field type, field range, block not permitted in document kind, duplicate uniqueness-required entry, malformed Unicode, field-specific length cap) |
 | 140-142 | Numeric grammar (float, exponent, overflow) |
 | 143     | Stage 5 semantic - submit-budget state-policy aggregate overflow |
@@ -100,7 +103,7 @@ Requires Python 3.10+ and the `cryptography` package (for raw Ed25519 RFC 8032 s
 | 170-179 | Stage 9 binding (path mismatch, reserved path, request_hash, request_id, origin binding, origin not_after semantic constraints including both `reason` values, manifest.updated future-skew) |
 | 180-189 | Canary (equal `issued_at` conflict, anti-downgrade, interval-bounds violation, issued_at future-skew, runtime-key reuse, and the `canary.runtime_pubkey` strict-profile rejection at Stage 8 for a small-order/non-canonical key, E_CANARY_INVALID with `reason="public_key_rejected"`) |
 | 190-199 | Unicode and canonicalization (NFD vs NFC; the §04 assigned-only gate, vector 193, rejecting a user-visible string code point unassigned in the pinned Unicode 15.0 baseline; and §04 RFC 3339 calendrical validity, vectors 194-195, an impossible calendar date 2026-02-30 in manifest.updated rejected at Stage 5 as E_SCHEMA_FIELD_SYNTAX and in canary.issued_at rejected at Stage 8 as E_CANARY_INVALID per the AMB-16 routing) |
-| 200-209 | Migration scenarios (successor_stage9_failure under `E_MIGRATION_MISMATCH`, including a broken successor that also announces a reverse cycle, pinning the successor-verification vs chain_cycle ordering; chain-cycle, announcement-internal successor_key_mismatch, and the self_pointer Stage-5 precedence vector under `E_MIGRATION_INVALID`; multi-document scenarios carry the successor manifest in `extra_files`) |
+| 200-209 | Migration scenarios (successor_stage9_failure under `E_MIGRATION_MISMATCH`, including a broken successor that also announces a reverse cycle, pinning the successor-verification vs chain_cycle ordering; chain-cycle, announcement-internal successor_key_mismatch, and the self_pointer Stage-5 precedence vector under `E_MIGRATION_INVALID`; multi-document scenarios carry the successor manifest in `extra_files` and run its history-dependent Stage 8 checks against migration-local provisional history, not global publisher history) |
 | 210-215 | Stage 7 trust state (publisher key mismatch and user-rejected new identity under `E_TRUST_MISMATCH`/`E_TRUST_USER_REJECTED`; first contact, TOFU pinning, and external verification as `accept` verdicts carrying `I_TRUST_FIRST_CONTACT`/`I_TRUST_TOFU_PINNED`/`I_TRUST_VERIFIED`; and the observed-only mismatch 215, where the §10:298 automatic observation record - created with no user decision - arms Changed/mismatch detection exactly as a pin, via `context.retained_provenance = "observed"`) |
 | 220-221 | Stage runtime state, undeclared `(namespace, key)` reference in a transaction set and delete (`E_STATE_UNDECLARED`), resolved against the manifest 002 state_policy via `context.previously_verified` |
 | 230-235 | Stage 9 content index and sequencing (`E_CONTENT_INDEX_HASH_MISMATCH`, `E_CONTENT_INDEX_INVALID`, `E_CONTENT_SEQ_MISSING`, `E_CONTENT_SEQ_ROLLBACK`, `E_CONTENT_SEQ_UNCOMMITTED`, `E_CONTENT_HASH_MISMATCH`; the content index travels in `extra_files` and `content_root` in `context`) |
