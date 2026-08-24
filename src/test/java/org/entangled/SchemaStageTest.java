@@ -69,6 +69,8 @@ class SchemaStageTest {
         record Case(String id, int cap, DiagnosticCode code) {
         }
         Case[] cases = {
+            new Case("123-link-citation-url-userinfo", Stage2Input.CONTENT_BYTE_CAP, DiagnosticCode.E_SCHEMA_FIELD_SYNTAX),
+            new Case("124-link-carrier-url-userinfo", Stage2Input.CONTENT_BYTE_CAP, DiagnosticCode.E_SCHEMA_FIELD_SYNTAX),
             new Case("130-schema-unknown-field", Stage2Input.MANIFEST_BYTE_CAP, DiagnosticCode.E_SCHEMA_UNKNOWN_FIELD),
             new Case("131-schema-missing-required", Stage2Input.MANIFEST_BYTE_CAP, DiagnosticCode.E_SCHEMA_REQUIRED_FIELD),
             new Case("132-schema-null-value", Stage2Input.MANIFEST_BYTE_CAP, DiagnosticCode.E_SCHEMA_NULL_VALUE),

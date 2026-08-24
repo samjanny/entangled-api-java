@@ -40,6 +40,15 @@ class Stage5CarrierUrlTest {
                 + "\"sig\":\"" + SIG + "\"}";
     }
 
+    private static String contentWithCitationLink(String url) {
+        return "{\"spec_version\":\"1.0\",\"kind\":\"content\",\"path\":\"/p\","
+                + "\"meta\":{\"title\":\"T\",\"published_at\":\"2026-05-07T00:00:00Z\"},"
+                + "\"blocks\":[{\"kind\":\"link\","
+                + "\"label\":[{\"kind\":\"text\",\"value\":\"Link\",\"marks\":[]}],"
+                + "\"target\":{\"kind\":\"citation\",\"url\":\"" + url + "\"}}],"
+                + "\"sig\":\"" + SIG + "\"}";
+    }
+
     private static DiagnosticCode rejectCode(String json) {
         JsonValue.Obj doc = (JsonValue.Obj) JsonParser.parse(json);
         RejectException ex = assertThrows(RejectException.class,
@@ -76,5 +85,24 @@ class Stage5CarrierUrlTest {
         acceptsSchema(contentWithCarrierLink("http://" + ONION + "/path"));
         // A port after the onion host is stripped before host validation.
         acceptsSchema(contentWithCarrierLink("http://" + ONION + ":8080/path"));
+    }
+
+    @Test
+    void carrierUserinfoRejectedBeforeOnionHostValidation() {
+        assertEquals(DiagnosticCode.E_SCHEMA_FIELD_SYNTAX,
+                rejectCode(contentWithCarrierLink("http://trusted.example@" + ONION + "/path")));
+    }
+
+    @Test
+    void citationUserinfoRejected() {
+        assertEquals(DiagnosticCode.E_SCHEMA_FIELD_SYNTAX,
+                rejectCode(contentWithCitationLink(
+                        "https://trusted.example@evil.example/reference")));
+    }
+
+    @Test
+    void citationExplicitProfileFeaturesAccepted() {
+        acceptsSchema(contentWithCitationLink(
+                "https://example.org:8443/a%2Fb?x=%7e#part%2Fone"));
     }
 }

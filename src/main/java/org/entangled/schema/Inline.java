@@ -170,17 +170,15 @@ public final class Inline {
             throw Fields.syntax();
         }
         rfc3986Chars(url);
-        // section 03:584: the URL host MUST be a valid carrier address for the
+        // Section 03: the URL host MUST be a valid carrier address for the
         // declared carrier; for tor-v3, a 56-char onion address plus ".onion".
         validateOnionAddress(authorityHost(url.substring("http://".length())));
     }
 
     /**
-     * Extract the host from the authority of a URL slice that follows the
-     * scheme prefix: stop at the first {@code /}, {@code ?}, or {@code #};
-     * strip optional userinfo before {@code @}; strip an optional {@code :port}
-     * suffix. Returns "" when no host is present, which
-     * {@link #validateOnionAddress} then rejects.
+     * Validate the rc.59 external-target authority profile and return its host.
+     * Userinfo is rejected before host extraction. An optional decimal port in
+     * {@code 1..65535} is accepted.
      */
     private static String authorityHost(String afterScheme) {
         int end = afterScheme.length();
@@ -192,10 +190,64 @@ public final class Inline {
             }
         }
         String authority = afterScheme.substring(0, end);
-        int at = authority.lastIndexOf('@');
-        String hostPort = (at >= 0) ? authority.substring(at + 1) : authority;
-        int colon = hostPort.lastIndexOf(':');
-        return (colon >= 0) ? hostPort.substring(0, colon) : hostPort;
+        if (authority.isEmpty() || authority.indexOf('@') >= 0) {
+            throw Fields.syntax();
+        }
+
+        String host;
+        String port = null;
+        if (authority.charAt(0) == '[') {
+            int close = authority.indexOf(']');
+            if (close <= 1 || authority.indexOf('[', 1) >= 0
+                    || authority.indexOf(']', close + 1) >= 0) {
+                throw Fields.syntax();
+            }
+            host = authority.substring(0, close + 1);
+            String tail = authority.substring(close + 1);
+            if (!tail.isEmpty()) {
+                if (tail.charAt(0) != ':') {
+                    throw Fields.syntax();
+                }
+                port = tail.substring(1);
+            }
+        } else {
+            if (authority.indexOf('[') >= 0 || authority.indexOf(']') >= 0) {
+                throw Fields.syntax();
+            }
+            int colon = authority.lastIndexOf(':');
+            if (colon >= 0) {
+                host = authority.substring(0, colon);
+                if (host.indexOf(':') >= 0) {
+                    throw Fields.syntax();
+                }
+                port = authority.substring(colon + 1);
+            } else {
+                host = authority;
+            }
+        }
+        if (host.isEmpty()) {
+            throw Fields.syntax();
+        }
+        if (port != null) {
+            if (port.isEmpty()) {
+                throw Fields.syntax();
+            }
+            long number = 0;
+            for (int i = 0; i < port.length(); i++) {
+                char c = port.charAt(i);
+                if (c < '0' || c > '9') {
+                    throw Fields.syntax();
+                }
+                number = number * 10 + (c - '0');
+                if (number > 65535) {
+                    throw Fields.syntax();
+                }
+            }
+            if (number == 0) {
+                throw Fields.syntax();
+            }
+        }
+        return host;
     }
 
     private static void validateCitationUrl(String url) {
@@ -203,6 +255,7 @@ public final class Inline {
             throw Fields.syntax();
         }
         rfc3986Chars(url);
+        authorityHost(url.substring("https://".length()));
     }
 
     /**

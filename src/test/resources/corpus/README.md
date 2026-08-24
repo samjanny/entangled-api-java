@@ -87,7 +87,7 @@ across runs and across machines.
 | 001-099 | Positive (must be accepted): 001-007 minimal baselines, 010 a fuller manifest (state_policy + origin.not_after + navigation together), 011 a valid transaction with set and delete state updates, 012 a successfully adopted migration whose successor Stage 8 checks use AMB-32 provisional history isolated from the announcing manifest and global publisher history, and 013-016 the inclusive-limit accepts pinned at their exact boundary (state ttl 7776000, state value 4096 bytes, origin.not_after at the 5-year ceiling, canary interval at the 7-day minimum), each paired with the one-past-the-limit reject (149, 148, 177, 182) |
 | 100-109 | Stage 2 input checks (BOM, UTF-8, byte cap) |
 | 110-119 | Stage 3 JSON parsing (duplicate keys, nesting depth, string length, array length, object keys, malformed JSON; and the Stage-3-limit-vs-numeric-grammar precedence vectors 117/118, where a structural limit co-occurs with a non-integer token and the Stage 3 limit code wins) |
-| 120-129 | Stage 4 kind discrimination (spec_version, unknown kind, missing required top-level field), and the nested enum-discriminator type rule (vector 129: a block/inline/op `kind` or `op` discriminator that is not a string is a Stage 5 `E_SCHEMA_FIELD_TYPE`, reported before signature verification) |
+| 120-129 | Stage 4 kind discrimination (spec_version, unknown kind, missing required top-level field); external-target URL userinfo rejection (123 citation and 124 carrier, both Stage 5 `E_SCHEMA_FIELD_SYNTAX`); and the nested enum-discriminator type rule (vector 129: a block/inline/op `kind` or `op` discriminator that is not a string is a Stage 5 `E_SCHEMA_FIELD_TYPE`, reported before signature verification) |
 | 130-139 | Stage 5 schema (unknown field, missing required, null literal, unknown block kind, field type, field range, block not permitted in document kind, duplicate uniqueness-required entry, malformed Unicode, field-specific length cap) |
 | 140-142 | Numeric grammar (float, exponent, overflow) |
 | 143     | Stage 5 semantic - submit-budget state-policy aggregate overflow |
@@ -95,7 +95,7 @@ across runs and across machines.
 | 146-147 | Stage 5 schema (empty mandatory array, nested inline link) |
 | 148-149, 169 | Stage 5 transaction state_updates (value over the 4096-byte hard ceiling, ttl outside 300..7776000 including a conforming integer above u32::MAX, both E_STATE_TTL) |
 | 150-157 | Stage 6 signature (modified payload, malformed length, non-canonical S, small-order A, non-canonical R, non-canonical A, missing-key context, small-order R) |
-| 158, 165-167 | Stage 5 link target URL (carrier URL host not a valid tor-v3 onion address; citation/carrier URL outside the RFC 3986 character set or carrying a malformed percent-encoded triplet) |
+| 123-124, 158, 165-167 | Stage 5 link target URL (userinfo prohibited for citation and carrier; carrier URL host not a valid tor-v3 onion address; citation/carrier URL outside the RFC 3986 character set or carrying a malformed percent-encoded triplet) |
 | 159     | Stage 5 manifest cross-field reporting precedence (co-occurring E_SUBMIT_BUDGET + E_ORIGIN_INVALID; the submit-budget aggregate is reported first per AMB-28) |
 | 160-162 | Strict base64url (padding, alphabet, whitespace) |
 | 163-164 | Stage 5 transaction state_updates operation-form schema (unknown `op` closed-enum violation E_SCHEMA_ENUM_VIOLATION, missing operation-form field E_SCHEMA_REQUIRED_FIELD) |
